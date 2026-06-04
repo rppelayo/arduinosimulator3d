@@ -16,6 +16,8 @@ const PART_LEAD_HANDLE_RADIUS = 0.76;
 const POSITION_LIMIT = 220;
 const SURFACE_SIZE_LIMIT = 220;
 const BREADBOARD_TERMINAL_COLUMNS = 30;
+const CABLE_STRAIN_RELIEF_LENGTH = 6.5;
+const CABLE_END_BEND_LIFT = 2.0;
 // The imported breadboard surface is mirrored across the cross-board axis
 // relative to the usual A-J lettering order, so the label assignment has to
 // run right-to-left for the UI/status readout to match the visible holes.
@@ -547,6 +549,10 @@ const tempCableStart = new THREE.Vector3();
 const tempCableEnd = new THREE.Vector3();
 const tempControlA = new THREE.Vector3();
 const tempControlB = new THREE.Vector3();
+const tempStartCableDir = new THREE.Vector3();
+const tempEndCableDir = new THREE.Vector3();
+const tempStartReliefPoint = new THREE.Vector3();
+const tempEndReliefPoint = new THREE.Vector3();
 const tempStartTip = new THREE.Vector3();
 const tempEndTip = new THREE.Vector3();
 const tempWireOffset = new THREE.Vector3();
@@ -3242,19 +3248,40 @@ function updateWireGeometry(wire) {
     tempAverageNormal.normalize();
   }
 
+    // Cable exit direction from each plug (local +Y axis in plug space)
+  tempStartCableDir.set(0, 1, 0).applyQuaternion(wire.startPlug.quaternion).normalize();
+  tempEndCableDir.set(0, 1, 0).applyQuaternion(wire.endPlug.quaternion).normalize();
+
+  // Extra near-plug relief points so the wire bends close to the connector
+  tempStartReliefPoint
+    .copy(tempCableStart)
+    .addScaledVector(tempStartCableDir, CABLE_STRAIN_RELIEF_LENGTH)
+    .addScaledVector(tempAverageNormal, CABLE_END_BEND_LIFT);
+
+  tempEndReliefPoint
+    .copy(tempCableEnd)
+    .addScaledVector(tempEndCableDir, CABLE_STRAIN_RELIEF_LENGTH)
+    .addScaledVector(tempAverageNormal, CABLE_END_BEND_LIFT);
+
+   // Main arch controls
   tempControlA
-    .lerpVectors(tempCableStart, tempCableEnd, 0.33)
+    .lerpVectors(tempStartReliefPoint, tempEndReliefPoint, 0.33)
     .addScaledVector(tempAverageNormal, lift);
+
   tempControlB
-    .lerpVectors(tempCableStart, tempCableEnd, 0.66)
+    .lerpVectors(tempStartReliefPoint, tempEndReliefPoint, 0.66)
     .addScaledVector(tempAverageNormal, lift * 0.88);
 
   const curve = new THREE.CatmullRomCurve3([
     tempCableStart.clone(),
+    tempStartReliefPoint.clone(),
     tempControlA.clone(),
     tempControlB.clone(),
+    tempEndReliefPoint.clone(),
     tempCableEnd.clone(),
   ]);
+
+  curve.curveType = 'centripetal';
 
   const nextGeometry = new THREE.TubeGeometry(curve, 42, CABLE_RADIUS, 14, false);
   wire.cableMesh.geometry.dispose();
