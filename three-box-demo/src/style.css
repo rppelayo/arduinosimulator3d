@@ -1,0 +1,263 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  background: #d7e2ea;
+  color: #0f172a;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  position: relative;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.72), transparent 34%),
+    linear-gradient(180deg, #edf3f8 0%, #d5e0e7 100%);
+}
+
+.app-shell {
+  width: 100%;
+  height: 100%;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hud {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 10;
+  width: min(340px, calc(100vw - 32px));
+  padding: 16px 18px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(14px);
+  pointer-events: none;
+}
+
+.debug-panel {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 12;
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100vh - 36px);
+  padding: 16px 18px;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(14px);
+}
+
+.debug-panel__header h2 {
+  margin: 0;
+  font-size: 1.22rem;
+  line-height: 1.15;
+  color: #0f172a;
+}
+
+.debug-panel__copy {
+  margin: 8px 0 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: #475569;
+}
+
+.debug-panel__sections {
+  margin-top: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.rotation-card {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, white);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(241, 245, 249, 0.82));
+}
+
+.rotation-card__header {
+  margin-bottom: 10px;
+}
+
+.rotation-card__header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.rotation-card__header p {
+  margin: 6px 0 0;
+  font-family: "Consolas", "SFMono-Regular", monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #334155;
+}
+
+.transform-group + .transform-group {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.transform-group__title {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 78%, #0f172a);
+}
+
+.rotation-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 76px;
+  align-items: center;
+  gap: 10px;
+}
+
+.rotation-row + .rotation-row {
+  margin-top: 8px;
+}
+
+.rotation-row__axis {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.rotation-row__slider {
+  width: 100%;
+}
+
+.rotation-row__number {
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
+  font: inherit;
+}
+
+.debug-panel__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.debug-button {
+  flex: 1;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: #2563eb;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.debug-button:hover {
+  filter: brightness(1.05);
+}
+
+.debug-button:active {
+  transform: translateY(1px);
+}
+
+.debug-button--ghost {
+  background: #dbe7f6;
+  color: #1e3a8a;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #2563eb;
+}
+
+.hud h1 {
+  margin: 0 0 6px;
+  font-size: 1.35rem;
+  line-height: 1.1;
+  color: #0f172a;
+}
+
+.instruction,
+.status {
+  margin: 0;
+  line-height: 1.48;
+  font-size: 0.96rem;
+}
+
+.instruction {
+  color: #334155;
+}
+
+.status {
+  margin-top: 10px;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+
+body.is-dragging {
+  user-select: none;
+}
+
+@media (max-width: 720px) {
+  .hud {
+    top: 12px;
+    left: 12px;
+    width: min(320px, calc(100vw - 24px));
+    padding: 14px 15px;
+    border-radius: 16px;
+  }
+
+  .hud h1 {
+    font-size: 1.18rem;
+  }
+
+  .instruction,
+  .status {
+    font-size: 0.9rem;
+  }
+
+  .debug-panel {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+    max-height: min(48vh, 420px);
+    padding: 14px 15px;
+    border-radius: 16px;
+  }
+
+  .debug-panel__header h2 {
+    font-size: 1.12rem;
+  }
+
+  .debug-panel__copy,
+  .rotation-card__header p,
+  .transform-group__title,
+  .rotation-row__number,
+  .debug-button {
+    font-size: 0.9rem;
+  }
+}
