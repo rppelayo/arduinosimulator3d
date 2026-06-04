@@ -4,25 +4,176 @@ import './style.css';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-const ARDUINO_PIN_LABEL = 'D7';
 const BREADBOARD_PITCH = 2.54;
 const SNAP_DISTANCE = 4.4;
 const CABLE_EXIT_OFFSET = 14.85;
 const CABLE_RADIUS = 0.9;
 const DEG_TO_RAD = Math.PI / 180;
+const PLUG_INSERTION_DEPTH = 3.2;
+const DEFAULT_PART_SURFACE_LIFT = 0.14;
+const WORKSPACE_WIRE_BASE_HEIGHT = 1.9;
+const PART_LEAD_HANDLE_RADIUS = 0.76;
 const POSITION_LIMIT = 220;
 const SURFACE_SIZE_LIMIT = 220;
 const BREADBOARD_TERMINAL_COLUMNS = 30;
-const BREADBOARD_LEFT_ROW_LABELS = ['A', 'B', 'C', 'D', 'E'];
-const BREADBOARD_RIGHT_ROW_LABELS = ['F', 'G', 'H', 'I', 'J'];
+// The imported breadboard surface is mirrored across the cross-board axis
+// relative to the usual A-J lettering order, so the label assignment has to
+// run right-to-left for the UI/status readout to match the visible holes.
+const BREADBOARD_LEFT_ROW_LABELS = ['J', 'I', 'H', 'G', 'F'];
+const BREADBOARD_RIGHT_ROW_LABELS = ['E', 'D', 'C', 'B', 'A'];
 const BREADBOARD_ROW_GAP_HALF = BREADBOARD_PITCH * 1.5;
 const BREADBOARD_COLUMN_START = -BREADBOARD_PITCH * ((BREADBOARD_TERMINAL_COLUMNS - 1) / 2);
 const BREADBOARD_LEFT_ROW_START =
   -BREADBOARD_ROW_GAP_HALF - BREADBOARD_PITCH * (BREADBOARD_LEFT_ROW_LABELS.length - 1);
 const BREADBOARD_RIGHT_ROW_START = BREADBOARD_ROW_GAP_HALF;
+const BREADBOARD_LEFT_TERMINAL_OUTER_X = BREADBOARD_LEFT_ROW_START;
+const BREADBOARD_RIGHT_TERMINAL_OUTER_X =
+  BREADBOARD_RIGHT_ROW_START + BREADBOARD_PITCH * (BREADBOARD_RIGHT_ROW_LABELS.length - 1);
+const BREADBOARD_POWER_RAIL_GAP = BREADBOARD_PITCH * 2;
+const BREADBOARD_POWER_RAIL_SPACING = BREADBOARD_PITCH;
+const BREADBOARD_LEFT_POWER_RAIL_INNER_X =
+  BREADBOARD_LEFT_TERMINAL_OUTER_X - BREADBOARD_POWER_RAIL_GAP;
+const BREADBOARD_LEFT_POWER_RAIL_OUTER_X =
+  BREADBOARD_LEFT_POWER_RAIL_INNER_X - BREADBOARD_POWER_RAIL_SPACING;
+const BREADBOARD_RIGHT_POWER_RAIL_INNER_X =
+  BREADBOARD_RIGHT_TERMINAL_OUTER_X + BREADBOARD_POWER_RAIL_GAP;
+const BREADBOARD_RIGHT_POWER_RAIL_OUTER_X =
+  BREADBOARD_RIGHT_POWER_RAIL_INNER_X + BREADBOARD_POWER_RAIL_SPACING;
+const BREADBOARD_POWER_RAIL_GROUP_COUNT_PER_SIDE = 5;
+const BREADBOARD_POWER_RAIL_HOLES_PER_GROUP = 5;
+const BREADBOARD_POWER_RAIL_GROUP_CENTER_START_Z = BREADBOARD_COLUMN_START + BREADBOARD_PITCH * 2;
+const BREADBOARD_POWER_RAIL_GROUP_CENTER_STEP_Z = BREADBOARD_PITCH * 6;
+const BREADBOARD_POWER_RAIL_GROUP_ROW_OFFSETS = Array.from(
+  { length: BREADBOARD_POWER_RAIL_HOLES_PER_GROUP },
+  (_, holeIndex) =>
+    (holeIndex - (BREADBOARD_POWER_RAIL_HOLES_PER_GROUP - 1) / 2) * BREADBOARD_PITCH
+);
+const BREADBOARD_POWER_RAIL_GROUP_COLUMN_OFFSETS = [
+  -BREADBOARD_PITCH * 0.5,
+  BREADBOARD_PITCH * 0.5,
+];
+const BREADBOARD_LEFT_POWER_RAIL_GROUP_CENTER_X =
+  (BREADBOARD_LEFT_POWER_RAIL_INNER_X + BREADBOARD_LEFT_POWER_RAIL_OUTER_X) * 0.5;
+const BREADBOARD_RIGHT_POWER_RAIL_GROUP_CENTER_X =
+  (BREADBOARD_RIGHT_POWER_RAIL_INNER_X + BREADBOARD_RIGHT_POWER_RAIL_OUTER_X) * 0.5;
+const POWER_RAIL_GROUP_DEFINITIONS = [
+  ...Array.from({ length: BREADBOARD_POWER_RAIL_GROUP_COUNT_PER_SIDE }, (_, groupIndex) => ({
+    key: `powerRailLeft${groupIndex + 1}`,
+    label: `Left Rail Group ${groupIndex + 1}`,
+    code: `L${groupIndex + 1}`,
+    accent: '#ef4444',
+    markerColor: 0xfb7185,
+    basePosition: {
+      x: BREADBOARD_RIGHT_POWER_RAIL_GROUP_CENTER_X,
+      y: 0,
+      z: BREADBOARD_POWER_RAIL_GROUP_CENTER_START_Z +
+        groupIndex * BREADBOARD_POWER_RAIL_GROUP_CENTER_STEP_Z,
+    },
+  })),
+  ...Array.from({ length: BREADBOARD_POWER_RAIL_GROUP_COUNT_PER_SIDE }, (_, groupIndex) => ({
+    key: `powerRailRight${groupIndex + 1}`,
+    label: `Right Rail Group ${groupIndex + 1}`,
+    code: `R${groupIndex + 1}`,
+    accent: '#0ea5e9',
+    markerColor: 0x38bdf8,
+    basePosition: {
+      x: BREADBOARD_LEFT_POWER_RAIL_GROUP_CENTER_X,
+      y: 0,
+      z: BREADBOARD_POWER_RAIL_GROUP_CENTER_START_Z +
+        groupIndex * BREADBOARD_POWER_RAIL_GROUP_CENTER_STEP_Z,
+    },
+  })),
+];
+const POWER_RAIL_GROUP_DEFINITION_BY_KEY = new Map(
+  POWER_RAIL_GROUP_DEFINITIONS.map((definition) => [definition.key, definition])
+);
+const DEFAULT_POWER_RAIL_GROUP_POSITIONS = {
+  powerRailLeft1: { x: 2.0, y: 0, z: 1.0 },
+  powerRailLeft2: { x: 2.0, y: 0, z: 1.0 },
+  powerRailLeft3: { x: 2.0, y: 0, z: 1.0 },
+  powerRailLeft4: { x: 2.0, y: 0, z: 1.0 },
+  powerRailLeft5: { x: 2.0, y: 0, z: 1.0 },
+  powerRailRight1: { x: -1.4, y: 0, z: 1.0 },
+  powerRailRight2: { x: -1.4, y: 0, z: 1.0 },
+  powerRailRight3: { x: -1.4, y: 0, z: 1.0 },
+  powerRailRight4: { x: -1.4, y: 0, z: 1.0 },
+  powerRailRight5: { x: -1.4, y: 0, z: 1.0 },
+};
+const DEFAULT_POWER_RAIL_GROUP_ROTATIONS = Object.fromEntries(
+  POWER_RAIL_GROUP_DEFINITIONS.map((definition) => [definition.key, { x: 0, y: 0, z: 0 }])
+);
+const ARDUINO_HEADER_GROUP_DEFINITIONS = [
+  {
+    key: 'arduinoHeaderLeftGroup1',
+    label: 'Arduino Left Header Group 1',
+    code: 'LH1',
+    accent: '#16a34a',
+    markerColor: 0x4ade80,
+    surfaceKey: 'arduinoHeaderLeft',
+    holeCount: 8,
+    pinLabels: ['D7', 'D6', 'D5', 'D4', 'D3', 'D2', 'D1', 'D0'],
+    // Mirror the green-side run so it starts from the opposite edge:
+    // 8 pins first, then one empty pitch, then the 10-pin block.
+    basePosition: { x: 0, y: 0, z: 13.97 },
+  },
+  {
+    key: 'arduinoHeaderLeftGroup2',
+    label: 'Arduino Left Header Group 2',
+    code: 'LH2',
+    accent: '#16a34a',
+    markerColor: 0x22c55e,
+    surfaceKey: 'arduinoHeaderLeft',
+    holeCount: 10,
+    pinLabels: ['SCL', 'SDA', 'AREF', 'GND', 'D13', 'D12', 'D11', 'D10', 'D9', 'D8'],
+    basePosition: { x: 0, y: 0, z: -11.43 },
+  },
+  {
+    key: 'arduinoHeaderRightGroup1',
+    label: 'Arduino Right Header Group 1',
+    code: 'RH1',
+    accent: '#f59e0b',
+    markerColor: 0xfbbf24,
+    surfaceKey: 'arduinoHeaderRight',
+    holeCount: 6,
+    pinLabels: ['A5', 'A4', 'A3', 'A2', 'A1', 'A0'],
+    // Start from the header edge that lines up with breadboard A1-J1,
+    // then place the first 6-pin block one pitch inside that edge.
+    basePosition: { x: 0, y: 0, z: -10.36 },
+  },
+  {
+    key: 'arduinoHeaderRightGroup2',
+    label: 'Arduino Right Header Group 2',
+    code: 'RH2',
+    accent: '#f59e0b',
+    markerColor: 0xf59e0b,
+    surfaceKey: 'arduinoHeaderRight',
+    holeCount: 7,
+    pinLabels: ['VIN', 'GND', 'GND', '5V', '3.3V', 'RESET', 'IOREF'],
+    // Leave one empty pitch after the first block, then place the 7-pin block.
+    basePosition: { x: 0, y: 0, z: 8.69 },
+  },
+];
+const ARDUINO_HEADER_GROUP_DEFINITION_BY_KEY = new Map(
+  ARDUINO_HEADER_GROUP_DEFINITIONS.map((definition) => [definition.key, definition])
+);
+const DEFAULT_ARDUINO_HEADER_GROUP_POSITIONS = Object.fromEntries(
+  ARDUINO_HEADER_GROUP_DEFINITIONS.map((definition) => {
+    const defaultsByKey = {
+      arduinoHeaderLeftGroup1: { x: -0.1, y: 0, z: -0.3 },
+      arduinoHeaderLeftGroup2: { x: -0.1, y: 0, z: 0.7 },
+      arduinoHeaderRightGroup1: { x: 0.2, y: 0, z: -1.0 },
+      arduinoHeaderRightGroup2: { x: 0.2, y: 0, z: -1.0 },
+    };
+
+    return [definition.key, { ...defaultsByKey[definition.key] }];
+  })
+);
+const DEFAULT_ARDUINO_HEADER_GROUP_ROTATIONS = Object.fromEntries(
+  ARDUINO_HEADER_GROUP_DEFINITIONS.map((definition) => [definition.key, { x: 0, y: 0, z: 0 }])
+);
 const BREADBOARD_SURFACE_BASE_WIDTH =
-  (BREADBOARD_RIGHT_ROW_START + BREADBOARD_PITCH * (BREADBOARD_RIGHT_ROW_LABELS.length - 1)) -
-  BREADBOARD_LEFT_ROW_START +
+  BREADBOARD_RIGHT_POWER_RAIL_OUTER_X -
+  BREADBOARD_LEFT_POWER_RAIL_OUTER_X +
   BREADBOARD_PITCH * 2.1;
 const BREADBOARD_SURFACE_BASE_DEPTH =
   (BREADBOARD_COLUMN_START + BREADBOARD_PITCH * (BREADBOARD_TERMINAL_COLUMNS - 1)) -
@@ -93,9 +244,10 @@ const BASE_SURFACE_SIZES = {
     depth: BREADBOARD_SURFACE_BASE_DEPTH,
   },
 };
+const CONNECTABLE_SURFACE_KEYS = ['arduinoHeaderLeft', 'arduinoHeaderRight', 'breadboardSurface'];
 const DRAG_SURFACE_KEYS = {
-  start: ['arduinoHeaderLeft', 'arduinoHeaderRight'],
-  end: ['breadboardSurface'],
+  start: CONNECTABLE_SURFACE_KEYS,
+  end: CONNECTABLE_SURFACE_KEYS,
 };
 const TRANSFORM_SECTIONS = [
   { key: 'arduino', label: 'Arduino Uno', accent: '#16a34a', enablePosition: true, enableRotation: true },
@@ -107,6 +259,49 @@ const TRANSFORM_SECTIONS = [
   { key: 'wireStart', label: 'Wire Start Plug', accent: '#f97316', enablePosition: false, enableRotation: true },
   { key: 'wireEnd', label: 'Wire End Plug', accent: '#0ea5e9', enablePosition: false, enableRotation: true },
 ];
+const PART_DEFINITIONS = [
+  {
+    key: 'ledRed',
+    label: 'Red LED',
+    statusLabel: 'red LED',
+    accent: '#ef4444',
+    description: '5mm through-hole LED',
+    modelUrl: '/models/uno_simulator/5mm_LED_Red.glb',
+    baseRotation: { x: -90, y: 0, z: 0 },
+    surfaceLiftY: -15.0,
+    leadPoints: [
+      { x: -1.49, y: 0, z: 0 },
+      { x: 1.06, y: 0, z: 0 },
+    ],
+    leadLabels: ['Left Lead', 'Right Lead'],
+  },
+  {
+    key: 'resistor10k',
+    label: '10K Resistor',
+    statusLabel: '10K resistor',
+    accent: '#f59e0b',
+    description: '0.25W through-hole resistor',
+    modelUrl: '/models/uno_simulator/Resistor_0.25W.glb',
+    baseRotation: { x: -90, y: 0, z: 0 },
+    surfaceLiftY: 15.0,
+    leadPoints: [
+      { x: -5.55, y: 0, z: 0 },
+      { x: 5.55, y: 0, z: 0 },
+    ],
+    leadLabels: ['Left Lead', 'Right Lead'],
+  },
+];
+const PART_DEFINITION_BY_KEY = new Map(
+  PART_DEFINITIONS.map((definition) => [definition.key, definition])
+);
+
+console.table(
+  PART_DEFINITIONS.map((definition) => ({
+    part: definition.label,
+    key: definition.key,
+    surfaceLiftY: definition.surfaceLiftY ?? DEFAULT_PART_SURFACE_LIFT,
+  }))
+);
 
 const appShell = document.createElement('div');
 appShell.className = 'app-shell';
@@ -117,7 +312,7 @@ hud.className = 'hud';
 hud.innerHTML = `
   <p class="eyebrow">Uno Simulator</p>
   <h1>Drag The Dupont Wire</h1>
-  <p class="instruction">Grab either glowing wire plug and drop it onto an Arduino or breadboard hole. Use the debug panel to tune object positions and rotations.</p>
+  <p class="instruction">Grab either glowing wire plug and drop it onto an Arduino or breadboard hole. Use the parts bin to drag LEDs and a resistor onto the breadboard.</p>
   <p class="status" data-status>Loading simulator assets...</p>
 `;
 document.body.appendChild(hud);
@@ -139,10 +334,73 @@ debugPanel.innerHTML = `
   </div>
 `;
 document.body.appendChild(debugPanel);
+debugPanel.hidden = true;
 
 const debugSectionsRoot = debugPanel.querySelector('[data-debug-sections]');
 const copyRotationsButton = debugPanel.querySelector('[data-action="copy"]');
 const resetRotationsButton = debugPanel.querySelector('[data-action="reset"]');
+
+const powerRailPanel = document.createElement('aside');
+powerRailPanel.className = 'debug-panel debug-panel--calibration';
+powerRailPanel.innerHTML = `
+  <div class="debug-panel__header">
+    <p class="eyebrow">Power Rail Calibration</p>
+    <h2>Marker Group Controls</h2>
+    <p class="debug-panel__copy">Each card adjusts one power rail group: five holes long and two columns wide. Offsets are local to the breadboard surface and rotations are in degrees.</p>
+  </div>
+  <div class="debug-panel__sections" data-power-rail-sections></div>
+  <div class="debug-panel__actions">
+    <button type="button" class="debug-button" data-action="copy-power-rail">Copy Values</button>
+    <button type="button" class="debug-button debug-button--ghost" data-action="reset-power-rail">Reset</button>
+  </div>
+`;
+document.body.appendChild(powerRailPanel);
+powerRailPanel.hidden = true;
+
+const powerRailSectionsRoot = powerRailPanel.querySelector('[data-power-rail-sections]');
+const copyPowerRailButton = powerRailPanel.querySelector('[data-action="copy-power-rail"]');
+const resetPowerRailButton = powerRailPanel.querySelector('[data-action="reset-power-rail"]');
+
+const arduinoHeaderPanel = document.createElement('aside');
+arduinoHeaderPanel.className = 'debug-panel debug-panel--calibration';
+arduinoHeaderPanel.innerHTML = `
+  <div class="debug-panel__header">
+    <p class="eyebrow">Arduino Header Calibration</p>
+    <h2>Header Marker Controls</h2>
+    <p class="debug-panel__copy">Each card adjusts one contiguous Arduino header group. The green cards belong to the current left header surface, and the orange cards belong to the current right header surface.</p>
+  </div>
+  <div class="debug-panel__sections" data-arduino-header-sections></div>
+  <div class="debug-panel__actions">
+    <button type="button" class="debug-button" data-action="copy-arduino-header">Copy Values</button>
+    <button type="button" class="debug-button debug-button--ghost" data-action="reset-arduino-header">Reset</button>
+  </div>
+`;
+document.body.appendChild(arduinoHeaderPanel);
+arduinoHeaderPanel.hidden = true;
+
+const arduinoHeaderSectionsRoot = arduinoHeaderPanel.querySelector('[data-arduino-header-sections]');
+const copyArduinoHeaderButton = arduinoHeaderPanel.querySelector('[data-action="copy-arduino-header"]');
+const resetArduinoHeaderButton = arduinoHeaderPanel.querySelector('[data-action="reset-arduino-header"]');
+
+const partsPanel = document.createElement('aside');
+partsPanel.className = 'debug-panel debug-panel--parts';
+partsPanel.innerHTML = `
+  <div class="debug-panel__header">
+    <p class="eyebrow">Parts Bin</p>
+    <h2>Drag Components</h2>
+    <p class="debug-panel__copy">Press and drag a component card onto the breadboard, then release to place it.</p>
+  </div>
+  <div class="debug-panel__sections" data-parts-sections></div>
+  <div class="debug-panel__actions">
+    <button type="button" class="debug-button" data-action="add-wire">Add Dupont Wire</button>
+    <button type="button" class="debug-button debug-button--ghost" data-action="clear-parts">Clear Placed</button>
+  </div>
+`;
+document.body.appendChild(partsPanel);
+
+const partsSectionsRoot = partsPanel.querySelector('[data-parts-sections]');
+const addWireButton = partsPanel.querySelector('[data-action="add-wire"]');
+const clearPartsButton = partsPanel.querySelector('[data-action="clear-parts"]');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xe7edf4);
@@ -247,6 +505,34 @@ const rotationState = {
   wireEnd: { ...DEFAULT_ROTATIONS.wireEnd },
 };
 const transformUi = new Map();
+const powerRailGroupPositionState = Object.fromEntries(
+  POWER_RAIL_GROUP_DEFINITIONS.map((definition) => [
+    definition.key,
+    { ...DEFAULT_POWER_RAIL_GROUP_POSITIONS[definition.key] },
+  ])
+);
+const powerRailGroupRotationState = Object.fromEntries(
+  POWER_RAIL_GROUP_DEFINITIONS.map((definition) => [
+    definition.key,
+    { ...DEFAULT_POWER_RAIL_GROUP_ROTATIONS[definition.key] },
+  ])
+);
+const powerRailGroupUi = new Map();
+const powerRailGroupRoots = new Map();
+const arduinoHeaderGroupPositionState = Object.fromEntries(
+  ARDUINO_HEADER_GROUP_DEFINITIONS.map((definition) => [
+    definition.key,
+    { ...DEFAULT_ARDUINO_HEADER_GROUP_POSITIONS[definition.key] },
+  ])
+);
+const arduinoHeaderGroupRotationState = Object.fromEntries(
+  ARDUINO_HEADER_GROUP_DEFINITIONS.map((definition) => [
+    definition.key,
+    { ...DEFAULT_ARDUINO_HEADER_GROUP_ROTATIONS[definition.key] },
+  ])
+);
+const arduinoHeaderGroupUi = new Map();
+const arduinoHeaderGroupRoots = new Map();
 const wireStartRotationOffset = new THREE.Quaternion();
 const wireEndRotationOffset = new THREE.Quaternion();
 
@@ -275,6 +561,23 @@ const tempSurfacePlane = new THREE.Plane();
 const upAxis = new THREE.Vector3(0, 1, 0);
 const startPlugSurfaceAxis = new THREE.Vector3(-1, 0, 0);
 const endPlugSurfaceAxis = new THREE.Vector3(1, 0, 0);
+const tempPartWorldPosition = new THREE.Vector3();
+const tempPartParentQuaternion = new THREE.Quaternion();
+const tempPartWorldQuaternion = new THREE.Quaternion();
+const tempPartRotationOffset = new THREE.Quaternion();
+const tempPartEuler = new THREE.Euler();
+const tempPartLeadPointA = new THREE.Vector3();
+const tempPartLeadPointB = new THREE.Vector3();
+const tempPartLeadDirection = new THREE.Vector3();
+const tempPartLeadDirectionB = new THREE.Vector3();
+const tempPartBasisY = new THREE.Vector3();
+const tempPartBasisZ = new THREE.Vector3();
+const tempPartScaledLeadPoint = new THREE.Vector3();
+const tempPartScaledLeadPointB = new THREE.Vector3();
+const tempPartLocalPoint = new THREE.Vector3();
+const tempPartMatrix = new THREE.Matrix4();
+const tempPartMatrixB = new THREE.Matrix4();
+const tempPartMatrixC = new THREE.Matrix4();
 
 let arduino = null;
 let breadboard = null;
@@ -282,32 +585,48 @@ let arduinoRigRoot = null;
 let breadboardRigRoot = null;
 let arduinoHeaderLeft = null;
 let arduinoHeaderRight = null;
+let arduinoHeaderLeftContent = null;
+let arduinoHeaderRightContent = null;
 let breadboardSurface = null;
 const surfaceGuides = new Map();
 let startAnchor = null;
-let wireStartPlug = null;
-let startPlugHitArea = null;
-let endPlug = null;
-let endPlugHitArea = null;
-let cableMesh = null;
 let arduinoTargets = [];
 let breadboardTargets = [];
-let wireAssembly = null;
+let breadboardPartsRoot = null;
+const interactiveWires = [];
 
 const wireState = {
   dragging: false,
+  activeWire: null,
   draggedEnd: null,
-  hoveredHandle: null,
+  hoveredWire: null,
+  hoveredEnd: null,
   hoveredTarget: null,
-  startSnappedTarget: null,
-  endSnappedTarget: null,
-  startSurfaceKey: 'arduinoHeaderLeft',
-  endSurfaceKey: 'breadboardSurface',
-  startTip: new THREE.Vector3(),
-  endTip: new THREE.Vector3(),
+};
+const partModelCache = new Map();
+const placedParts = [];
+const partDragState = {
+  active: false,
+  pointerId: null,
+  definitionKey: null,
+  previewPart: null,
+  placementValid: false,
+  clientX: 0,
+  clientY: 0,
+};
+const partLeadState = {
+  dragging: false,
+  activePart: null,
+  draggedEnd: null,
+  hoveredPart: null,
+  hoveredEnd: null,
+  hoveredTarget: null,
 };
 
 buildTransformDebugPanel();
+buildPowerRailCalibrationPanel();
+buildArduinoHeaderCalibrationPanel();
+buildPartsPanel();
 
 init().catch((error) => {
   console.error(error);
@@ -477,17 +796,100 @@ function updateWireRotationOffsets() {
   );
 }
 
-function getSurfaceKeyForEnd(endKey) {
-  return endKey === 'start' ? wireState.startSurfaceKey : wireState.endSurfaceKey;
+function getSurfaceKeyForEnd(wire, endKey) {
+  return endKey === 'start' ? wire.startSurfaceKey : wire.endSurfaceKey;
 }
 
-function setSurfaceKeyForEnd(endKey, surfaceKey) {
+function setSurfaceKeyForEnd(wire, endKey, surfaceKey) {
   if (endKey === 'start') {
-    wireState.startSurfaceKey = surfaceKey;
+    wire.startSurfaceKey = surfaceKey;
     return;
   }
 
-  wireState.endSurfaceKey = surfaceKey;
+  wire.endSurfaceKey = surfaceKey;
+}
+
+function getAllSnapTargets() {
+  return [...arduinoTargets, ...breadboardTargets];
+}
+
+function getAllWireHitAreas() {
+  const hitAreas = [];
+
+  for (const wire of interactiveWires) {
+    if (wire.startHitArea) {
+      hitAreas.push(wire.startHitArea);
+    }
+
+    if (wire.endHitArea) {
+      hitAreas.push(wire.endHitArea);
+    }
+  }
+
+  return hitAreas;
+}
+
+function getDefaultTargetForSurface(surfaceKey) {
+  if (surfaceKey === 'breadboardSurface') {
+    return (
+      breadboardTargets.find((target) => !target.userData.isPowerRail) ??
+      breadboardTargets[0] ??
+      null
+    );
+  }
+
+  if (surfaceKey === 'arduinoHeaderLeft' || surfaceKey === 'arduinoHeaderRight') {
+    return (
+      arduinoTargets.find((target) => target.userData.surfaceKey === surfaceKey) ??
+      arduinoTargets[0] ??
+      breadboardTargets.find((target) => !target.userData.isPowerRail) ??
+      breadboardTargets[0] ??
+      null
+    );
+  }
+
+  return (
+    arduinoTargets[0] ??
+    breadboardTargets.find((target) => !target.userData.isPowerRail) ??
+    breadboardTargets[0] ??
+    null
+  );
+}
+
+function getFallbackTargetForEnd(wire, endKey) {
+  const snappedTarget = endKey === 'start' ? wire.startSnappedTarget : wire.endSnappedTarget;
+  return snappedTarget ?? getDefaultTargetForSurface(getSurfaceKeyForEnd(wire, endKey));
+}
+
+function isTargetSnappedByAnyWire(target) {
+  return interactiveWires.some(
+    (wire) => wire.startSnappedTarget === target || wire.endSnappedTarget === target
+  );
+}
+
+function getLatestConnectedWire(requireBothEnds = false) {
+  for (let index = interactiveWires.length - 1; index >= 0; index -= 1) {
+    const wire = interactiveWires[index];
+    const isConnected = requireBothEnds
+      ? Boolean(wire.startSnappedTarget && wire.endSnappedTarget)
+      : Boolean(wire.startSnappedTarget || wire.endSnappedTarget);
+
+    if (isConnected) {
+      return wire;
+    }
+  }
+
+  return null;
+}
+
+function buildTargetConnectionLabel(target) {
+  if (!target) {
+    return 'target hole';
+  }
+
+  return target.userData.surfaceKey === 'breadboardSurface'
+    ? `breadboard ${target.userData.label}`
+    : `Arduino ${target.userData.label}`;
 }
 
 function getSurfaceGuide(key) {
@@ -565,7 +967,7 @@ function getClampedPointOnSurfaceFromRay(ray, surfaceKey, output) {
   return true;
 }
 
-function getClampedDragPointForEnd(endKey, ray, output) {
+function getClampedDragPointForEnd(wire, endKey, ray, output) {
   const surfaceKeys = DRAG_SURFACE_KEYS[endKey];
 
   if (!surfaceKeys || surfaceKeys.length === 0) {
@@ -590,7 +992,7 @@ function getClampedDragPointForEnd(endKey, ray, output) {
   }
 
   if (!bestSurfaceKey) {
-    const fallbackSurfaceKey = getSurfaceKeyForEnd(endKey);
+    const fallbackSurfaceKey = getSurfaceKeyForEnd(wire, endKey);
 
     if (
       fallbackSurfaceKey &&
@@ -618,24 +1020,26 @@ function getTargetWorldNormal(target, output) {
 }
 
 function alignArduinoStartAnchorToHeader() {
-  if (!startAnchor) {
+  if (!startAnchor || startAnchor.parent !== arduino) {
     return;
   }
 
-  // D7 currently lives on the calibrated left header strip, so the snap
-  // target needs to inherit that surface normal for plug aiming and dragging.
+  // Legacy single-target Arduino anchors lived directly under the board root,
+  // so keep that behavior if one is ever reintroduced.
   if (arduinoHeaderLeft) {
     startAnchor.quaternion.copy(arduinoHeaderLeft.quaternion);
   }
 }
 
 function updateArduinoDragPlane() {
-  if (arduinoTargets.length === 0) {
+  const activeWire = wireState.activeWire ?? interactiveWires[0] ?? null;
+
+  if (getAllSnapTargets().length === 0 || !activeWire) {
     return;
   }
 
   if (!(wireState.dragging && wireState.draggedEnd === 'start' && wireState.hoveredTarget)) {
-    const surfaceKey = getSurfaceKeyForEnd('start');
+    const surfaceKey = getSurfaceKeyForEnd(activeWire, 'start');
 
     if (surfaceKey) {
       getSurfaceNormal(surfaceKey, tempBreadboardNormal);
@@ -650,7 +1054,11 @@ function updateArduinoDragPlane() {
   const planeTarget =
     wireState.dragging && wireState.draggedEnd === 'start' && wireState.hoveredTarget
       ? wireState.hoveredTarget
-      : wireState.startSnappedTarget ?? arduinoTargets[0];
+      : getFallbackTargetForEnd(activeWire, 'start');
+
+  if (!planeTarget) {
+    return;
+  }
 
   getTargetWorldNormal(planeTarget, tempBreadboardNormal);
   arduinoDragPlane.setFromNormalAndCoplanarPoint(
@@ -660,12 +1068,14 @@ function updateArduinoDragPlane() {
 }
 
 function updateBreadboardDragPlane() {
-  if (breadboardTargets.length === 0) {
+  const activeWire = wireState.activeWire ?? interactiveWires[0] ?? null;
+
+  if (getAllSnapTargets().length === 0 || !activeWire) {
     return;
   }
 
   if (!(wireState.dragging && wireState.draggedEnd === 'end' && wireState.hoveredTarget)) {
-    const surfaceKey = getSurfaceKeyForEnd('end');
+    const surfaceKey = getSurfaceKeyForEnd(activeWire, 'end');
 
     if (surfaceKey) {
       getSurfaceNormal(surfaceKey, tempBreadboardNormal);
@@ -680,7 +1090,11 @@ function updateBreadboardDragPlane() {
   const planeTarget =
     wireState.dragging && wireState.draggedEnd === 'end' && wireState.hoveredTarget
       ? wireState.hoveredTarget
-      : wireState.endSnappedTarget ?? breadboardTargets[Math.floor(breadboardTargets.length / 2)];
+      : getFallbackTargetForEnd(activeWire, 'end');
+
+  if (!planeTarget) {
+    return;
+  }
 
   getTargetWorldNormal(planeTarget, tempBreadboardNormal);
   breadboardDragPlane.setFromNormalAndCoplanarPoint(
@@ -689,12 +1103,13 @@ function updateBreadboardDragPlane() {
   );
 }
 
-function getPlugSurfaceNormal(endKey, output) {
-  const isDraggingThisEnd = wireState.dragging && wireState.draggedEnd === endKey;
+function getPlugSurfaceNormal(wire, endKey, output) {
+  const isDraggingThisEnd =
+    wireState.dragging && wireState.activeWire === wire && wireState.draggedEnd === endKey;
   const hoveredTarget = isDraggingThisEnd ? wireState.hoveredTarget : null;
-  const snappedTarget = endKey === 'start' ? wireState.startSnappedTarget : wireState.endSnappedTarget;
-  const surfaceKey = getSurfaceKeyForEnd(endKey);
-  const fallbackTarget = endKey === 'start' ? arduinoTargets[0] : breadboardTargets[0];
+  const snappedTarget = endKey === 'start' ? wire.startSnappedTarget : wire.endSnappedTarget;
+  const surfaceKey = getSurfaceKeyForEnd(wire, endKey);
+  const fallbackTarget = getFallbackTargetForEnd(wire, endKey);
 
   if (hoveredTarget) {
     return getTargetWorldNormal(hoveredTarget, output);
@@ -742,16 +1157,34 @@ function syncInteractiveTransforms() {
   updateArduinoDragPlane();
   updateBreadboardDragPlane();
 
-  if (wireState.startSnappedTarget) {
-    wireState.startTip.copy(wireState.startSnappedTarget.userData.worldPosition);
+  for (const wire of interactiveWires) {
+    if (wire.startSnappedTarget) {
+      wire.startTip.copy(wire.startSnappedTarget.userData.worldPosition);
+    }
+
+    if (wire.endSnappedTarget) {
+      wire.endTip.copy(wire.endSnappedTarget.userData.worldPosition);
+    }
+
+    if (wire.cableMesh && wire.endPlug) {
+      updateWireGeometry(wire);
+    }
   }
 
-  if (wireState.endSnappedTarget) {
-    wireState.endTip.copy(wireState.endSnappedTarget.userData.worldPosition);
-  }
+  for (const part of placedParts) {
+    if (part.userData.startSnappedTarget) {
+      tempPartLocalPoint.copy(part.userData.startSnappedTarget.userData.worldPosition);
+      breadboardPartsRoot.worldToLocal(tempPartLocalPoint);
+      part.userData.startLeadPositionLocal.copy(tempPartLocalPoint);
+    }
 
-  if (cableMesh && endPlug) {
-    updateWireGeometry();
+    if (part.userData.endSnappedTarget) {
+      tempPartLocalPoint.copy(part.userData.endSnappedTarget.userData.worldPosition);
+      breadboardPartsRoot.worldToLocal(tempPartLocalPoint);
+      part.userData.endLeadPositionLocal.copy(tempPartLocalPoint);
+    }
+
+    updateInteractivePartTransform(part);
   }
 
   refreshTargetVisuals();
@@ -806,6 +1239,8 @@ function applyDebugTransforms() {
     setObjectEulerDegrees(breadboardSurface, rotationState.breadboardSurface);
   }
 
+  applyArduinoHeaderGroupTransforms();
+  applyPowerRailGroupTransforms();
   applyAllSurfaceGuideSizes();
   updateWireRotationOffsets();
   syncInteractiveTransforms();
@@ -1103,6 +1538,461 @@ function buildTransformDebugPanel() {
   });
 }
 
+function buildPowerRailGroupOffsetSummary(key) {
+  const state = powerRailGroupPositionState[key];
+  return `x ${formatPositionUnits(state.x)}  y ${formatPositionUnits(state.y)}  z ${formatPositionUnits(state.z)}`;
+}
+
+function buildPowerRailGroupRotationSummary(key) {
+  const state = powerRailGroupRotationState[key];
+  return `x ${formatRotationDegrees(state.x)}  y ${formatRotationDegrees(state.y)}  z ${formatRotationDegrees(state.z)}`;
+}
+
+function buildPowerRailGroupCurrentPositionSummary(key) {
+  const definition = POWER_RAIL_GROUP_DEFINITION_BY_KEY.get(key);
+  const offset = powerRailGroupPositionState[key];
+
+  return `x ${formatPositionUnits(definition.basePosition.x + offset.x)}  y ${formatPositionUnits(definition.basePosition.y + offset.y)}  z ${formatPositionUnits(definition.basePosition.z + offset.z)}`;
+}
+
+function refreshPowerRailGroupSection(key) {
+  const section = powerRailGroupUi.get(key);
+
+  if (!section) {
+    return;
+  }
+
+  for (const axis of ['x', 'y', 'z']) {
+    section.controls.position[axis].range.value = String(powerRailGroupPositionState[key][axis]);
+    section.controls.position[axis].number.value =
+      powerRailGroupPositionState[key][axis].toFixed(1);
+    section.controls.rotation[axis].range.value = String(powerRailGroupRotationState[key][axis]);
+    section.controls.rotation[axis].number.value =
+      powerRailGroupRotationState[key][axis].toFixed(1);
+  }
+
+  section.originReadout.textContent = `Origin: ${buildPowerRailGroupCurrentPositionSummary(key)}`;
+  section.positionReadout.textContent = `Offset: ${buildPowerRailGroupOffsetSummary(key)}`;
+  section.rotationReadout.textContent = `Rotation: ${buildPowerRailGroupRotationSummary(key)}`;
+}
+
+function setPowerRailGroupPositionValue(key, axis, nextValue) {
+  const parsed = Number.parseFloat(nextValue);
+  const value = clampPositionUnits(parsed);
+  powerRailGroupPositionState[key][axis] = value;
+
+  refreshPowerRailGroupSection(key);
+  applyDebugTransforms();
+}
+
+function setPowerRailGroupRotationValue(key, axis, nextValue) {
+  const parsed = Number.parseFloat(nextValue);
+  const value = clampRotationDegrees(parsed);
+  powerRailGroupRotationState[key][axis] = value;
+
+  refreshPowerRailGroupSection(key);
+  applyDebugTransforms();
+}
+
+function createPowerRailGroupSection(definition) {
+  const section = document.createElement('section');
+  section.className = 'rotation-card';
+  section.style.setProperty('--accent', definition.accent);
+
+  section.innerHTML = `
+    <div class="rotation-card__header">
+      <h3>${definition.label}</h3>
+      <p data-origin-readout></p>
+      <p data-position-readout></p>
+      <p data-rotation-readout></p>
+    </div>
+    <div class="transform-group">
+      <p class="transform-group__title">Position Offset</p>
+      ${['x', 'y', 'z']
+        .map((axis) =>
+          createAxisControlMarkup(
+            axis,
+            powerRailGroupPositionState[definition.key][axis],
+            'position',
+            {
+              min: -POSITION_LIMIT,
+              max: POSITION_LIMIT,
+              rangeStep: 1,
+              numberStep: 0.1,
+            }
+          )
+        )
+        .join('')}
+    </div>
+    <div class="transform-group">
+      <p class="transform-group__title">Rotation Offset</p>
+      ${['x', 'y', 'z']
+        .map((axis) =>
+          createAxisControlMarkup(
+            axis,
+            powerRailGroupRotationState[definition.key][axis],
+            'rotation',
+            {
+              min: -180,
+              max: 180,
+              rangeStep: 1,
+              numberStep: 0.1,
+            }
+          )
+        )
+        .join('')}
+    </div>
+  `;
+
+  const controls = {
+    position: { x: {}, y: {}, z: {} },
+    rotation: { x: {}, y: {}, z: {} },
+  };
+
+  for (const group of ['position', 'rotation']) {
+    for (const axis of ['x', 'y', 'z']) {
+      const range = section.querySelector(
+        `[data-group="${group}"][data-axis="${axis}"][data-role="range"]`
+      );
+      const number = section.querySelector(
+        `[data-group="${group}"][data-axis="${axis}"][data-role="number"]`
+      );
+
+      const handleInput = (event) => {
+        if (group === 'position') {
+          setPowerRailGroupPositionValue(definition.key, axis, event.target.value);
+          return;
+        }
+
+        setPowerRailGroupRotationValue(definition.key, axis, event.target.value);
+      };
+
+      range.addEventListener('input', handleInput);
+      number.addEventListener('input', handleInput);
+
+      controls[group][axis] = { range, number };
+    }
+  }
+
+  powerRailGroupUi.set(definition.key, {
+    originReadout: section.querySelector('[data-origin-readout]'),
+    positionReadout: section.querySelector('[data-position-readout]'),
+    rotationReadout: section.querySelector('[data-rotation-readout]'),
+    controls,
+  });
+
+  refreshPowerRailGroupSection(definition.key);
+
+  return section;
+}
+
+function buildPowerRailCopyLine(definition) {
+  return [
+    `${definition.label}:`,
+    `origin ${buildPowerRailGroupCurrentPositionSummary(definition.key)}`,
+    `offset ${buildPowerRailGroupOffsetSummary(definition.key)}`,
+    `rotation ${buildPowerRailGroupRotationSummary(definition.key)}`,
+  ].join(' | ');
+}
+
+function buildPowerRailCalibrationPanel() {
+  for (const definition of POWER_RAIL_GROUP_DEFINITIONS) {
+    powerRailSectionsRoot.appendChild(createPowerRailGroupSection(definition));
+  }
+
+  copyPowerRailButton.addEventListener('click', async () => {
+    const lines = POWER_RAIL_GROUP_DEFINITIONS.map((definition) =>
+      buildPowerRailCopyLine(definition)
+    );
+
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      setStatus('Copied the current power rail group values to the clipboard.');
+    } catch (error) {
+      console.warn('Clipboard write failed:', error);
+      setStatus('Clipboard access is unavailable. Read the power rail values directly from the calibration panel.');
+    }
+  });
+
+  resetPowerRailButton.addEventListener('click', () => {
+    for (const definition of POWER_RAIL_GROUP_DEFINITIONS) {
+      powerRailGroupPositionState[definition.key] = {
+        ...DEFAULT_POWER_RAIL_GROUP_POSITIONS[definition.key],
+      };
+      powerRailGroupRotationState[definition.key] = {
+        ...DEFAULT_POWER_RAIL_GROUP_ROTATIONS[definition.key],
+      };
+      refreshPowerRailGroupSection(definition.key);
+    }
+
+    applyDebugTransforms();
+    setStatus('Reset all power rail marker group offsets and rotations.');
+  });
+}
+
+function applyPowerRailGroupTransforms() {
+  for (const definition of POWER_RAIL_GROUP_DEFINITIONS) {
+    const groupRoot = powerRailGroupRoots.get(definition.key);
+
+    if (!groupRoot) {
+      continue;
+    }
+
+    setObjectPositionFromBase(
+      groupRoot,
+      definition.basePosition,
+      powerRailGroupPositionState[definition.key]
+    );
+    setObjectEulerDegrees(groupRoot, powerRailGroupRotationState[definition.key]);
+  }
+}
+
+function buildArduinoHeaderGroupOffsetSummary(key) {
+  const state = arduinoHeaderGroupPositionState[key];
+  return `x ${formatPositionUnits(state.x)}  y ${formatPositionUnits(state.y)}  z ${formatPositionUnits(state.z)}`;
+}
+
+function buildArduinoHeaderGroupRotationSummary(key) {
+  const state = arduinoHeaderGroupRotationState[key];
+  return `x ${formatRotationDegrees(state.x)}  y ${formatRotationDegrees(state.y)}  z ${formatRotationDegrees(state.z)}`;
+}
+
+function buildArduinoHeaderGroupCurrentPositionSummary(key) {
+  const definition = ARDUINO_HEADER_GROUP_DEFINITION_BY_KEY.get(key);
+  const offset = arduinoHeaderGroupPositionState[key];
+
+  return `x ${formatPositionUnits(definition.basePosition.x + offset.x)}  y ${formatPositionUnits(definition.basePosition.y + offset.y)}  z ${formatPositionUnits(definition.basePosition.z + offset.z)}`;
+}
+
+function refreshArduinoHeaderGroupSection(key) {
+  const section = arduinoHeaderGroupUi.get(key);
+
+  if (!section) {
+    return;
+  }
+
+  for (const axis of ['x', 'y', 'z']) {
+    section.controls.position[axis].range.value = String(arduinoHeaderGroupPositionState[key][axis]);
+    section.controls.position[axis].number.value =
+      arduinoHeaderGroupPositionState[key][axis].toFixed(1);
+    section.controls.rotation[axis].range.value = String(arduinoHeaderGroupRotationState[key][axis]);
+    section.controls.rotation[axis].number.value =
+      arduinoHeaderGroupRotationState[key][axis].toFixed(1);
+  }
+
+  section.originReadout.textContent = `Origin: ${buildArduinoHeaderGroupCurrentPositionSummary(key)}`;
+  section.positionReadout.textContent = `Offset: ${buildArduinoHeaderGroupOffsetSummary(key)}`;
+  section.rotationReadout.textContent = `Rotation: ${buildArduinoHeaderGroupRotationSummary(key)}`;
+}
+
+function setArduinoHeaderGroupPositionValue(key, axis, nextValue) {
+  const parsed = Number.parseFloat(nextValue);
+  const value = clampPositionUnits(parsed);
+  arduinoHeaderGroupPositionState[key][axis] = value;
+
+  refreshArduinoHeaderGroupSection(key);
+  applyDebugTransforms();
+}
+
+function setArduinoHeaderGroupRotationValue(key, axis, nextValue) {
+  const parsed = Number.parseFloat(nextValue);
+  const value = clampRotationDegrees(parsed);
+  arduinoHeaderGroupRotationState[key][axis] = value;
+
+  refreshArduinoHeaderGroupSection(key);
+  applyDebugTransforms();
+}
+
+function createArduinoHeaderGroupSection(definition) {
+  const section = document.createElement('section');
+  section.className = 'rotation-card';
+  section.style.setProperty('--accent', definition.accent);
+
+  section.innerHTML = `
+    <div class="rotation-card__header">
+      <h3>${definition.label}</h3>
+      <p data-origin-readout></p>
+      <p data-position-readout></p>
+      <p data-rotation-readout></p>
+    </div>
+    <div class="transform-group">
+      <p class="transform-group__title">Position Offset</p>
+      ${['x', 'y', 'z']
+        .map((axis) =>
+          createAxisControlMarkup(
+            axis,
+            arduinoHeaderGroupPositionState[definition.key][axis],
+            'position',
+            {
+              min: -POSITION_LIMIT,
+              max: POSITION_LIMIT,
+              rangeStep: 1,
+              numberStep: 0.1,
+            }
+          )
+        )
+        .join('')}
+    </div>
+    <div class="transform-group">
+      <p class="transform-group__title">Rotation Offset</p>
+      ${['x', 'y', 'z']
+        .map((axis) =>
+          createAxisControlMarkup(
+            axis,
+            arduinoHeaderGroupRotationState[definition.key][axis],
+            'rotation',
+            {
+              min: -180,
+              max: 180,
+              rangeStep: 1,
+              numberStep: 0.1,
+            }
+          )
+        )
+        .join('')}
+    </div>
+  `;
+
+  const controls = {
+    position: { x: {}, y: {}, z: {} },
+    rotation: { x: {}, y: {}, z: {} },
+  };
+
+  for (const group of ['position', 'rotation']) {
+    for (const axis of ['x', 'y', 'z']) {
+      const range = section.querySelector(
+        `[data-group="${group}"][data-axis="${axis}"][data-role="range"]`
+      );
+      const number = section.querySelector(
+        `[data-group="${group}"][data-axis="${axis}"][data-role="number"]`
+      );
+
+      const handleInput = (event) => {
+        if (group === 'position') {
+          setArduinoHeaderGroupPositionValue(definition.key, axis, event.target.value);
+          return;
+        }
+
+        setArduinoHeaderGroupRotationValue(definition.key, axis, event.target.value);
+      };
+
+      range.addEventListener('input', handleInput);
+      number.addEventListener('input', handleInput);
+
+      controls[group][axis] = { range, number };
+    }
+  }
+
+  arduinoHeaderGroupUi.set(definition.key, {
+    originReadout: section.querySelector('[data-origin-readout]'),
+    positionReadout: section.querySelector('[data-position-readout]'),
+    rotationReadout: section.querySelector('[data-rotation-readout]'),
+    controls,
+  });
+
+  refreshArduinoHeaderGroupSection(definition.key);
+
+  return section;
+}
+
+function buildArduinoHeaderCopyLine(definition) {
+  return [
+    `${definition.label}:`,
+    `origin ${buildArduinoHeaderGroupCurrentPositionSummary(definition.key)}`,
+    `offset ${buildArduinoHeaderGroupOffsetSummary(definition.key)}`,
+    `rotation ${buildArduinoHeaderGroupRotationSummary(definition.key)}`,
+  ].join(' | ');
+}
+
+function buildArduinoHeaderCalibrationPanel() {
+  for (const definition of ARDUINO_HEADER_GROUP_DEFINITIONS) {
+    arduinoHeaderSectionsRoot.appendChild(createArduinoHeaderGroupSection(definition));
+  }
+
+  copyArduinoHeaderButton.addEventListener('click', async () => {
+    const lines = ARDUINO_HEADER_GROUP_DEFINITIONS.map((definition) =>
+      buildArduinoHeaderCopyLine(definition)
+    );
+
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      setStatus('Copied the current Arduino header group values to the clipboard.');
+    } catch (error) {
+      console.warn('Clipboard write failed:', error);
+      setStatus('Clipboard access is unavailable. Read the Arduino header values directly from the calibration panel.');
+    }
+  });
+
+  resetArduinoHeaderButton.addEventListener('click', () => {
+    for (const definition of ARDUINO_HEADER_GROUP_DEFINITIONS) {
+      arduinoHeaderGroupPositionState[definition.key] = {
+        ...DEFAULT_ARDUINO_HEADER_GROUP_POSITIONS[definition.key],
+      };
+      arduinoHeaderGroupRotationState[definition.key] = {
+        ...DEFAULT_ARDUINO_HEADER_GROUP_ROTATIONS[definition.key],
+      };
+      refreshArduinoHeaderGroupSection(definition.key);
+    }
+
+    applyDebugTransforms();
+    setStatus('Reset all Arduino header marker group offsets and rotations.');
+  });
+}
+
+function createPartCard(definition) {
+  const section = document.createElement('section');
+  section.className = 'rotation-card parts-card';
+  section.style.setProperty('--accent', definition.accent);
+  section.innerHTML = `
+    <button type="button" class="parts-card__button" data-part-key="${definition.key}">
+      <span class="parts-card__icon">${definition.label.slice(0, 1)}</span>
+      <span class="parts-card__content">
+        <span class="parts-card__title">${definition.label}</span>
+        <span class="parts-card__copy">${definition.description}</span>
+      </span>
+      <span class="parts-card__drag">Drag</span>
+    </button>
+  `;
+
+  const button = section.querySelector('[data-part-key]');
+  button.addEventListener('pointerdown', (event) => {
+    beginPartDrag(event, definition.key);
+  });
+
+  return section;
+}
+
+function buildPartsPanel() {
+  for (const definition of PART_DEFINITIONS) {
+    partsSectionsRoot.appendChild(createPartCard(definition));
+  }
+
+  addWireButton.addEventListener('click', () => {
+    addInteractiveWire();
+  });
+
+  clearPartsButton.addEventListener('click', () => {
+    clearPlacedParts();
+  });
+}
+
+function applyArduinoHeaderGroupTransforms() {
+  for (const definition of ARDUINO_HEADER_GROUP_DEFINITIONS) {
+    const groupRoot = arduinoHeaderGroupRoots.get(definition.key);
+
+    if (!groupRoot) {
+      continue;
+    }
+
+    setObjectPositionFromBase(
+      groupRoot,
+      definition.basePosition,
+      arduinoHeaderGroupPositionState[definition.key]
+    );
+    setObjectEulerDegrees(groupRoot, arduinoHeaderGroupRotationState[definition.key]);
+  }
+}
+
 function loadModel(url) {
   return new Promise((resolve, reject) => {
     loader.load(url, resolve, undefined, reject);
@@ -1212,6 +2102,79 @@ function createSnapTarget(label) {
   return target;
 }
 
+function addBreadboardSnapTarget(parent, targets, label, x, z, options = {}) {
+  const target = createSnapTarget(label);
+  target.position.set(x, 0, z);
+  target.userData.surfaceKey = 'breadboardSurface';
+  target.userData.isPowerRail = Boolean(options.isPowerRail);
+  target.userData.alwaysVisible = Boolean(options.alwaysVisible);
+  target.userData.idleColor = options.idleColor ?? 0xcfd8e3;
+  target.userData.groupKey = options.groupKey ?? null;
+  parent.add(target);
+  targets.push(target);
+
+  return target;
+}
+
+function createPowerRailGroup(parent, targets, definition) {
+  const group = new THREE.Group();
+  parent.add(group);
+  powerRailGroupRoots.set(definition.key, group);
+
+  for (
+    let columnIndex = 0;
+    columnIndex < BREADBOARD_POWER_RAIL_GROUP_COLUMN_OFFSETS.length;
+    columnIndex += 1
+  ) {
+    for (
+      let holeIndex = 0;
+      holeIndex < BREADBOARD_POWER_RAIL_GROUP_ROW_OFFSETS.length;
+      holeIndex += 1
+    ) {
+      addBreadboardSnapTarget(
+        group,
+        targets,
+        `${definition.code} C${columnIndex + 1} H${holeIndex + 1}`,
+        BREADBOARD_POWER_RAIL_GROUP_COLUMN_OFFSETS[columnIndex],
+        BREADBOARD_POWER_RAIL_GROUP_ROW_OFFSETS[holeIndex],
+        {
+          isPowerRail: true,
+          alwaysVisible: false,
+          idleColor: definition.markerColor,
+          groupKey: definition.key,
+        }
+      );
+    }
+  }
+}
+
+function createArduinoHeaderGroup(parent, targets, definition) {
+  const group = new THREE.Group();
+  parent.add(group);
+  arduinoHeaderGroupRoots.set(definition.key, group);
+
+  for (let holeIndex = 0; holeIndex < definition.holeCount; holeIndex += 1) {
+    const pinLabel = definition.pinLabels?.[holeIndex] ?? `${definition.code}-${holeIndex + 1}`;
+    const target = createSnapTarget(pinLabel);
+    target.position.set(
+      0,
+      0,
+      (holeIndex - (definition.holeCount - 1) / 2) * BREADBOARD_PITCH
+    );
+    target.userData.surfaceKey = definition.surfaceKey;
+    target.userData.alwaysVisible = false;
+    target.userData.idleColor = definition.markerColor;
+    target.userData.groupKey = definition.key;
+    target.userData.isArduinoHeader = true;
+    target.userData.pinIndex = holeIndex;
+    target.userData.pinLabel = pinLabel;
+    group.add(target);
+    targets.push(target);
+  }
+
+  return group;
+}
+
 function createSurfaceGuide(width, depth, fillColor, outlineColor) {
   const group = new THREE.Group();
 
@@ -1246,8 +2209,13 @@ function createSurfaceGuide(width, depth, fillColor, outlineColor) {
 function setTargetVisualState(target, active, snapped) {
   const marker = target.userData.marker;
   const halo = target.userData.halo;
-  const visible = active || snapped;
-  const color = snapped ? 0xff8b2b : active ? 0x5aa7ff : 0xcfd8e3;
+  const forcedVisible = Boolean(target.userData.alwaysVisible);
+  const visible = forcedVisible || active || snapped;
+  const color = snapped
+    ? 0xff8b2b
+    : active
+      ? 0x5aa7ff
+      : target.userData.idleColor ?? 0xcfd8e3;
 
   marker.visible = visible;
   halo.visible = visible;
@@ -1259,18 +2227,17 @@ function setTargetVisualState(target, active, snapped) {
   marker.userData.ring.material.color.setHex(color);
   marker.userData.ring.material.emissive.setHex(color);
   marker.userData.core.material.emissive.setHex(color);
-  marker.scale.setScalar(snapped ? 1.28 : active ? 1.14 : 0.94);
+  marker.scale.setScalar(snapped ? 1.28 : active ? 1.14 : forcedVisible ? 0.82 : 0.94);
 
   halo.material.color.setHex(color);
-  halo.material.opacity = snapped ? 0.34 : active ? 0.24 : 0.1;
-  halo.scale.setScalar(snapped ? 1.18 : active ? 1.08 : 0.92);
+  halo.material.opacity = snapped ? 0.34 : active ? 0.24 : forcedVisible ? 0.14 : 0.1;
+  halo.scale.setScalar(snapped ? 1.18 : active ? 1.08 : forcedVisible ? 0.84 : 0.92);
 }
 
 function refreshTargetVisuals() {
-  for (const target of [...arduinoTargets, ...breadboardTargets]) {
-    const active = target === wireState.hoveredTarget;
-    const snapped =
-      target === wireState.startSnappedTarget || target === wireState.endSnappedTarget;
+  for (const target of getAllSnapTargets()) {
+    const active = target === wireState.hoveredTarget || target === partLeadState.hoveredTarget;
+    const snapped = isTargetSnappedByAnyWire(target) || isTargetSnappedByAnyPart(target);
     setTargetVisualState(target, active, snapped);
   }
 }
@@ -1380,11 +2347,11 @@ function createCableMesh() {
   return mesh;
 }
 
-function createWireAssembly() {
+function createWireAssembly(includeHandles = true) {
   const group = new THREE.Group();
 
-  const startPlug = createDupontPlug(true);
-  const freePlug = createDupontPlug(true);
+  const startPlug = createDupontPlug(includeHandles);
+  const freePlug = createDupontPlug(includeHandles);
   const cable = createCableMesh();
 
   group.add(cable, startPlug, freePlug);
@@ -1396,100 +2363,874 @@ function createWireAssembly() {
   return group;
 }
 
+function createInteractiveWire(options = {}) {
+  const assembly = createWireAssembly(true);
+  const wire = {
+    assembly,
+    startPlug: assembly.userData.startPlug,
+    endPlug: assembly.userData.endPlug,
+    startHitArea: assembly.userData.startPlug.userData.hitArea,
+    endHitArea: assembly.userData.endPlug.userData.hitArea,
+    cableMesh: assembly.userData.cableMesh,
+    isPrimary: Boolean(options.isPrimary),
+    startSnappedTarget: null,
+    endSnappedTarget: null,
+    startSurfaceKey: 'arduinoHeaderLeft',
+    endSurfaceKey: 'breadboardSurface',
+    startInsertionDepth: 0,
+    endInsertionDepth: 0,
+    startTip: new THREE.Vector3(),
+    endTip: new THREE.Vector3(),
+  };
+
+  wire.startHitArea.userData.wire = wire;
+  wire.startHitArea.userData.endKey = 'start';
+  wire.endHitArea.userData.wire = wire;
+  wire.endHitArea.userData.endKey = 'end';
+  assembly.userData.interactiveWire = wire;
+
+  return wire;
+}
+
+function initializePrimaryWire(wire) {
+  wire.startSnappedTarget = startAnchor;
+  wire.startSurfaceKey = startAnchor?.userData.surfaceKey ?? 'arduinoHeaderLeft';
+  wire.startInsertionDepth = startAnchor ? PLUG_INSERTION_DEPTH : 0;
+
+  if (startAnchor?.userData.worldPosition) {
+    wire.startTip.copy(startAnchor.userData.worldPosition);
+  }
+
+  let defaultTarget =
+    breadboardTargets.find((target) => !target.userData.isPowerRail) ?? breadboardTargets[0] ?? null;
+  let nearestDistance = Infinity;
+
+  if (wire.startSnappedTarget?.userData.worldPosition) {
+    for (const target of breadboardTargets) {
+      if (target.userData.isPowerRail) {
+        continue;
+      }
+
+      const distance = wire.startSnappedTarget.userData.worldPosition.distanceTo(
+        target.userData.worldPosition
+      );
+
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        defaultTarget = target;
+      }
+    }
+  }
+
+  wire.endSurfaceKey = defaultTarget?.userData.surfaceKey ?? 'breadboardSurface';
+
+  if (!defaultTarget) {
+    wire.endTip.set(26, WORKSPACE_WIRE_BASE_HEIGHT, 48);
+    return;
+  }
+
+  wire.endTip.copy(defaultTarget.userData.worldPosition);
+  getTargetWorldNormal(defaultTarget, tempBreadboardNormal);
+  wire.endTip.addScaledVector(tempBreadboardNormal, 10);
+  wire.endTip.addScaledVector(
+    tempDirection.set(0, 0, 1).transformDirection(defaultTarget.matrixWorld),
+    3.5
+  );
+}
+
+function initializeLooseWire(wire, index) {
+  const column = index % 2;
+  const row = Math.floor(index / 2);
+  const baseX = column === 0 ? -38 : 18;
+  const baseZ = 82 - row * 22;
+
+  wire.startSnappedTarget = null;
+  wire.endSnappedTarget = null;
+  wire.startSurfaceKey = 'breadboardSurface';
+  wire.endSurfaceKey = 'breadboardSurface';
+  wire.startInsertionDepth = 0;
+  wire.endInsertionDepth = 0;
+  wire.startTip.set(baseX - 14, WORKSPACE_WIRE_BASE_HEIGHT, baseZ - 5);
+  wire.endTip.set(baseX + 14, WORKSPACE_WIRE_BASE_HEIGHT, baseZ + 5);
+}
+
+function addInteractiveWire() {
+  if (!breadboardSurface) {
+    setStatus('The workspace is still loading. Try adding another wire in a moment.');
+    return;
+  }
+
+  const wire = createInteractiveWire();
+  const additionalWireCount = interactiveWires.filter((candidate) => !candidate.isPrimary).length;
+  interactiveWires.push(wire);
+  assembly.add(wire.assembly);
+  wireState.activeWire = wire;
+  initializeLooseWire(wire, additionalWireCount);
+  updateWireGeometry(wire);
+  refreshTargetVisuals();
+  updateHandleVisuals();
+  updateCanvasCursor();
+  setStatus('Added another usable Dupont wire. Drag either glowing plug onto the Arduino or breadboard.');
+}
+
+function getAllPartLeadHitAreas() {
+  const hitAreas = [];
+
+  for (const part of placedParts) {
+    if (part.userData.startHitArea) {
+      hitAreas.push(part.userData.startHitArea);
+    }
+
+    if (part.userData.endHitArea) {
+      hitAreas.push(part.userData.endHitArea);
+    }
+  }
+
+  return hitAreas;
+}
+
+function isTargetSnappedByAnyPart(target) {
+  return placedParts.some(
+    (part) =>
+      part.userData.startSnappedTarget === target || part.userData.endSnappedTarget === target
+  );
+}
+
+function getPartLeadLabel(part, endKey) {
+  const definition = PART_DEFINITION_BY_KEY.get(part.userData.definitionKey);
+  const leadLabels = definition?.leadLabels ?? ['Left Lead', 'Right Lead'];
+
+  return endKey === 'start' ? leadLabels[0] : leadLabels[1];
+}
+
+function createPartLeadHandle(color) {
+  const group = new THREE.Group();
+  const marker = createPinMarker(color, PART_LEAD_HANDLE_RADIUS);
+  const halo = new THREE.Mesh(
+    new THREE.SphereGeometry(PART_LEAD_HANDLE_RADIUS * 1.8, 18, 18),
+    new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.2,
+      transparent: true,
+      opacity: 0.14,
+      depthWrite: false,
+    })
+  );
+  const hitArea = new THREE.Mesh(
+    new THREE.SphereGeometry(PART_LEAD_HANDLE_RADIUS * 2.8, 16, 16),
+    new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    })
+  );
+
+  group.add(marker, halo, hitArea);
+  marker.scale.setScalar(0.82);
+
+  group.userData.marker = marker;
+  group.userData.halo = halo;
+  group.userData.hitArea = hitArea;
+  group.userData.idleColor = color;
+
+  return group;
+}
+
+function setPartLeadVisualState(handle, active, snapped) {
+  if (!handle) {
+    return;
+  }
+
+  const marker = handle.userData.marker;
+  const halo = handle.userData.halo;
+  const color = snapped
+    ? 0xff8b2b
+    : active
+      ? 0x5aa7ff
+      : handle.userData.idleColor ?? 0xcfd8e3;
+
+  marker.visible = true;
+  halo.visible = true;
+
+  marker.userData.ring.material.color.setHex(color);
+  marker.userData.ring.material.emissive.setHex(color);
+  marker.userData.core.material.emissive.setHex(color);
+  marker.scale.setScalar(snapped ? 0.98 : active ? 0.9 : 0.78);
+
+  halo.material.color.setHex(color);
+  halo.material.emissive.setHex(color);
+  halo.material.opacity = snapped ? 0.28 : active ? 0.2 : 0.11;
+  halo.scale.setScalar(snapped ? 1.08 : active ? 1 : 0.9);
+}
+
+function updatePartLeadHandlePositions(part) {
+  const scaleX = part.userData.leadScaleX ?? 1;
+  const startHandle = part.userData.startHandle;
+  const endHandle = part.userData.endHandle;
+  const startLeadLocalPoint = part.userData.startLeadLocalPoint;
+  const endLeadLocalPoint = part.userData.endLeadLocalPoint;
+
+  if (!startHandle || !endHandle || !startLeadLocalPoint || !endLeadLocalPoint) {
+    return;
+  }
+
+  startHandle.position.copy(startLeadLocalPoint);
+  startHandle.position.x *= scaleX;
+  endHandle.position.copy(endLeadLocalPoint);
+  endHandle.position.x *= scaleX;
+}
+
+function createInteractivePart(definitionKey, preview = false) {
+  const definition = PART_DEFINITION_BY_KEY.get(definitionKey);
+  const prototype = partModelCache.get(definitionKey);
+
+  if (!definition || !prototype) {
+    return null;
+  }
+
+  const root = new THREE.Group();
+  const contentRoot = new THREE.Group();
+  const content = prototype.clone(true);
+  root.add(contentRoot);
+  contentRoot.add(content);
+
+  content.traverse((object) => {
+    if (!object.isMesh) {
+      return;
+    }
+
+    const isMaterialArray = Array.isArray(object.material);
+    const materials = isMaterialArray ? object.material : [object.material];
+    const nextMaterials = materials.map((material) => {
+      const nextMaterial = material.clone();
+
+      if (preview) {
+        nextMaterial.transparent = true;
+        nextMaterial.opacity = 0.68;
+        nextMaterial.depthWrite = false;
+      }
+
+      return nextMaterial;
+    });
+    object.material = isMaterialArray ? nextMaterials : nextMaterials[0];
+  });
+
+  tempPartEuler.set(
+    (definition.baseRotation?.x ?? 0) * DEG_TO_RAD,
+    (definition.baseRotation?.y ?? 0) * DEG_TO_RAD,
+    (definition.baseRotation?.z ?? 0) * DEG_TO_RAD,
+    'XYZ'
+  );
+  contentRoot.rotation.copy(tempPartEuler);
+  contentRoot.position.y = definition.surfaceLiftY ?? DEFAULT_PART_SURFACE_LIFT;
+
+  const startLeadLocalPoint = new THREE.Vector3(
+    definition.leadPoints?.[0]?.x ?? 0,
+    definition.leadPoints?.[0]?.y ?? 0,
+    definition.leadPoints?.[0]?.z ?? 0
+  ).applyEuler(tempPartEuler);
+  const endLeadLocalPoint = new THREE.Vector3(
+    definition.leadPoints?.[1]?.x ?? 0,
+    definition.leadPoints?.[1]?.y ?? 0,
+    definition.leadPoints?.[1]?.z ?? 0
+  ).applyEuler(tempPartEuler);
+
+  const startHandle = createPartLeadHandle(0x40d6b1);
+  const endHandle = createPartLeadHandle(0x7ed2ff);
+  root.add(startHandle, endHandle);
+
+  startHandle.visible = !preview;
+  endHandle.visible = !preview;
+
+  root.userData.definitionKey = definitionKey;
+  root.userData.isPlacedPart = true;
+  root.userData.isInteractivePart = true;
+  root.userData.isPreview = preview;
+  root.userData.contentRoot = contentRoot;
+  root.userData.content = content;
+  root.userData.startHandle = startHandle;
+  root.userData.endHandle = endHandle;
+  root.userData.startHitArea = startHandle.userData.hitArea;
+  root.userData.endHitArea = endHandle.userData.hitArea;
+  root.userData.startLeadLocalPoint = startLeadLocalPoint;
+  root.userData.endLeadLocalPoint = endLeadLocalPoint;
+  root.userData.startLeadPositionLocal = new THREE.Vector3();
+  root.userData.endLeadPositionLocal = new THREE.Vector3();
+  root.userData.startSnappedTarget = null;
+  root.userData.endSnappedTarget = null;
+  root.userData.leadScaleX = 1;
+
+  root.userData.startHitArea.userData.part = root;
+  root.userData.startHitArea.userData.endKey = 'start';
+  root.userData.startHitArea.userData.interactionType = 'partLead';
+  root.userData.endHitArea.userData.part = root;
+  root.userData.endHitArea.userData.endKey = 'end';
+  root.userData.endHitArea.userData.interactionType = 'partLead';
+
+  updatePartLeadHandlePositions(root);
+
+  return root;
+}
+
+function updateInteractivePartTransform(part) {
+  if (!breadboardPartsRoot || !part) {
+    return false;
+  }
+
+  const startLeadPositionLocal = part.userData.startLeadPositionLocal;
+  const endLeadPositionLocal = part.userData.endLeadPositionLocal;
+  const startLeadLocalPoint = part.userData.startLeadLocalPoint;
+  const endLeadLocalPoint = part.userData.endLeadLocalPoint;
+  const contentRoot = part.userData.contentRoot;
+
+  if (
+    !startLeadPositionLocal ||
+    !endLeadPositionLocal ||
+    !startLeadLocalPoint ||
+    !endLeadLocalPoint ||
+    !contentRoot
+  ) {
+    return false;
+  }
+
+  tempPartLeadDirection.copy(endLeadLocalPoint).sub(startLeadLocalPoint);
+  const localLeadLength = tempPartLeadDirection.length();
+
+  if (localLeadLength < 1e-6) {
+    return false;
+  }
+
+  tempPartLeadDirectionB.copy(endLeadPositionLocal).sub(startLeadPositionLocal);
+  let worldLeadLength = tempPartLeadDirectionB.length();
+
+  if (worldLeadLength < 1e-6) {
+    tempPartLeadDirectionB.copy(tempPartLeadDirection).normalize();
+    worldLeadLength = localLeadLength;
+  } else {
+    tempPartLeadDirectionB.normalize();
+  }
+
+  tempPartLeadDirection.normalize();
+  tempPartBasisY.copy(upAxis).projectOnPlane(tempPartLeadDirection);
+  if (tempPartBasisY.lengthSq() < 1e-6) {
+    tempPartBasisY.set(0, 0, 1).projectOnPlane(tempPartLeadDirection);
+  }
+  tempPartBasisY.normalize();
+  tempPartBasisZ.crossVectors(tempPartLeadDirection, tempPartBasisY).normalize();
+  tempPartBasisY.crossVectors(tempPartBasisZ, tempPartLeadDirection).normalize();
+
+  tempPartMatrix.makeBasis(tempPartLeadDirection, tempPartBasisY, tempPartBasisZ);
+
+  tempPartBasisY.copy(upAxis).projectOnPlane(tempPartLeadDirectionB);
+  if (tempPartBasisY.lengthSq() < 1e-6) {
+    tempPartBasisY.set(0, 0, 1).projectOnPlane(tempPartLeadDirectionB);
+  }
+  tempPartBasisY.normalize();
+  tempPartBasisZ.crossVectors(tempPartLeadDirectionB, tempPartBasisY).normalize();
+  tempPartBasisY.crossVectors(tempPartBasisZ, tempPartLeadDirectionB).normalize();
+
+  tempPartMatrixB.makeBasis(tempPartLeadDirectionB, tempPartBasisY, tempPartBasisZ);
+  tempPartMatrixC.copy(tempPartMatrix).invert();
+  tempPartMatrix.multiplyMatrices(tempPartMatrixB, tempPartMatrixC);
+  part.quaternion.setFromRotationMatrix(tempPartMatrix);
+
+  const leadScaleX = THREE.MathUtils.clamp(worldLeadLength / localLeadLength, 0.35, 4);
+  part.userData.leadScaleX = leadScaleX;
+  contentRoot.scale.set(leadScaleX, 1, 1);
+
+  tempPartScaledLeadPoint.copy(startLeadLocalPoint);
+  tempPartScaledLeadPoint.x *= leadScaleX;
+  tempPartScaledLeadPoint.applyQuaternion(part.quaternion);
+
+  part.position.copy(startLeadPositionLocal).sub(tempPartScaledLeadPoint);
+  updatePartLeadHandlePositions(part);
+
+  return true;
+}
+
+function updatePartPlacementPreviewTransform(part, worldPoint) {
+  if (!breadboardPartsRoot || !part) {
+    return false;
+  }
+
+  tempPartLocalPoint.copy(worldPoint);
+  breadboardPartsRoot.worldToLocal(tempPartLocalPoint);
+
+  tempPartLeadPointA
+    .copy(part.userData.startLeadLocalPoint)
+    .add(part.userData.endLeadLocalPoint)
+    .multiplyScalar(0.5);
+
+  part.userData.startLeadPositionLocal
+    .copy(tempPartLocalPoint)
+    .add(tempPartScaledLeadPoint.copy(part.userData.startLeadLocalPoint).sub(tempPartLeadPointA));
+  part.userData.endLeadPositionLocal
+    .copy(tempPartLocalPoint)
+    .add(tempPartScaledLeadPointB.copy(part.userData.endLeadLocalPoint).sub(tempPartLeadPointA));
+
+  part.userData.startLeadPositionLocal.y = 0;
+  part.userData.endLeadPositionLocal.y = 0;
+  part.userData.startSnappedTarget = null;
+  part.userData.endSnappedTarget = null;
+
+  return updateInteractivePartTransform(part);
+}
+
+function isPointerOverCanvas(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+
+  return (
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom
+  );
+}
+
+function clearPartDragPreview() {
+  if (partDragState.previewPart?.parent) {
+    partDragState.previewPart.parent.remove(partDragState.previewPart);
+  }
+
+  partDragState.previewPart = null;
+  partDragState.placementValid = false;
+}
+
+function clearPlacedParts() {
+  for (const part of placedParts.splice(0, placedParts.length)) {
+    if (part.parent) {
+      part.parent.remove(part);
+    }
+  }
+
+  for (let index = interactiveWires.length - 1; index >= 0; index -= 1) {
+    const wire = interactiveWires[index];
+
+    if (wire.isPrimary) {
+      continue;
+    }
+
+    if (wire.cableMesh?.geometry) {
+      wire.cableMesh.geometry.dispose();
+    }
+
+    if (wire.assembly.parent) {
+      wire.assembly.parent.remove(wire.assembly);
+    }
+
+    interactiveWires.splice(index, 1);
+  }
+
+  if (!interactiveWires.includes(wireState.activeWire)) {
+    wireState.activeWire = interactiveWires[0] ?? null;
+    wireState.dragging = false;
+    wireState.draggedEnd = null;
+    wireState.hoveredTarget = null;
+  }
+
+  if (!interactiveWires.includes(wireState.hoveredWire)) {
+    wireState.hoveredWire = null;
+    wireState.hoveredEnd = null;
+  }
+
+  if (!placedParts.includes(partLeadState.activePart)) {
+    partLeadState.dragging = false;
+    partLeadState.activePart = null;
+    partLeadState.draggedEnd = null;
+    partLeadState.hoveredTarget = null;
+  }
+
+  if (!placedParts.includes(partLeadState.hoveredPart)) {
+    partLeadState.hoveredPart = null;
+    partLeadState.hoveredEnd = null;
+  }
+
+  controls.enabled = true;
+  document.body.classList.remove('is-dragging');
+  syncInteractiveTransforms();
+  updateHandleVisuals();
+  updateCanvasCursor();
+
+  if (!partDragState.active) {
+    setStatus('Cleared all placed parts and extra wires from the workspace.');
+  }
+}
+
+function updatePartDragPreview(event) {
+  if (!partDragState.active || !partDragState.previewPart) {
+    return;
+  }
+
+  if (!isPointerOverCanvas(event)) {
+    partDragState.previewPart.visible = false;
+    partDragState.placementValid = false;
+    updateStatusForState();
+    updateCanvasCursor();
+    return;
+  }
+
+  updatePointerFromEvent(event);
+  raycaster.setFromCamera(pointer, camera);
+
+  if (!getClampedPointOnSurfaceFromRay(raycaster.ray, 'breadboardSurface', tempPoint)) {
+    partDragState.previewPart.visible = false;
+    partDragState.placementValid = false;
+    updateStatusForState();
+    updateCanvasCursor();
+    return;
+  }
+
+  partDragState.previewPart.visible = true;
+  updatePartPlacementPreviewTransform(partDragState.previewPart, tempPoint);
+  partDragState.placementValid = true;
+  updateStatusForState();
+  updateCanvasCursor();
+}
+
+function beginPartDrag(event, definitionKey) {
+  const definition = PART_DEFINITION_BY_KEY.get(definitionKey);
+
+  if (
+    !definition ||
+    wireState.dragging ||
+    partLeadState.dragging ||
+    partDragState.active ||
+    !breadboardPartsRoot
+  ) {
+    return;
+  }
+
+  const previewPart = createInteractivePart(definitionKey, true);
+
+  if (!previewPart) {
+    setStatus(`Couldn't load the ${definition.statusLabel}. Check that the model file is available.`);
+    return;
+  }
+
+  event.preventDefault();
+  partDragState.active = true;
+  partDragState.pointerId = event.pointerId;
+  partDragState.definitionKey = definitionKey;
+  partDragState.previewPart = previewPart;
+  partDragState.placementValid = false;
+  partDragState.clientX = event.clientX;
+  partDragState.clientY = event.clientY;
+  wireState.hoveredWire = null;
+  wireState.hoveredEnd = null;
+  breadboardPartsRoot.add(previewPart);
+  previewPart.visible = false;
+  document.body.classList.add('is-dragging');
+
+  updateStatusForState();
+  updateCanvasCursor();
+}
+
+function finishPartDrag(event) {
+  if (!partDragState.active) {
+    return;
+  }
+
+  if (event.pointerId !== undefined && partDragState.pointerId !== event.pointerId) {
+    return;
+  }
+
+  const definition = PART_DEFINITION_BY_KEY.get(partDragState.definitionKey);
+  const placedPart = partDragState.previewPart && partDragState.placementValid
+    ? partDragState.previewPart
+    : null;
+
+  if (placedPart) {
+    placedPart.userData.content?.traverse((object) => {
+      if (!object.isMesh) {
+        return;
+      }
+
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) {
+        material.opacity = 1;
+        material.transparent = false;
+        material.depthWrite = true;
+      }
+    });
+    placedPart.userData.isPreview = false;
+    placedPart.userData.startHandle.visible = true;
+    placedPart.userData.endHandle.visible = true;
+  }
+
+  if (!placedPart) {
+    clearPartDragPreview();
+  } else {
+    partDragState.previewPart = null;
+    partDragState.placementValid = false;
+  }
+
+  partDragState.active = false;
+  partDragState.pointerId = null;
+  partDragState.definitionKey = null;
+  document.body.classList.remove('is-dragging');
+
+  if (placedPart) {
+    placedParts.push(placedPart);
+    setStatus(`Placed the ${definition?.statusLabel ?? 'part'} on the breadboard.`);
+  } else {
+    updateStatusForState();
+  }
+
+  updateCanvasCursor();
+}
+
+function beginPartLeadDrag(part, event, draggedEnd) {
+  event.preventDefault();
+  partLeadState.dragging = true;
+  partLeadState.activePart = part;
+  partLeadState.draggedEnd = draggedEnd;
+  partLeadState.hoveredPart = null;
+  partLeadState.hoveredEnd = null;
+  partLeadState.hoveredTarget = null;
+  wireState.hoveredWire = null;
+  wireState.hoveredEnd = null;
+  wireState.hoveredTarget = null;
+
+  if (draggedEnd === 'start') {
+    part.userData.startSnappedTarget = null;
+  } else {
+    part.userData.endSnappedTarget = null;
+  }
+
+  controls.enabled = false;
+  renderer.domElement.setPointerCapture(event.pointerId);
+  document.body.classList.add('is-dragging');
+
+  updateStatusForState();
+  updateCanvasCursor();
+  refreshTargetVisuals();
+}
+
+function finishPartLeadDrag(event) {
+  const part = partLeadState.activePart;
+
+  if (!partLeadState.dragging || !part) {
+    return;
+  }
+
+  const draggedEnd = partLeadState.draggedEnd;
+  partLeadState.dragging = false;
+
+  if (partLeadState.hoveredTarget) {
+    tempPartLocalPoint.copy(partLeadState.hoveredTarget.userData.worldPosition);
+    breadboardPartsRoot.worldToLocal(tempPartLocalPoint);
+
+    if (draggedEnd === 'start') {
+      part.userData.startSnappedTarget = partLeadState.hoveredTarget;
+      part.userData.startLeadPositionLocal.copy(tempPartLocalPoint);
+    } else {
+      part.userData.endSnappedTarget = partLeadState.hoveredTarget;
+      part.userData.endLeadPositionLocal.copy(tempPartLocalPoint);
+    }
+  }
+
+  partLeadState.draggedEnd = null;
+  partLeadState.hoveredTarget = null;
+  controls.enabled = true;
+  document.body.classList.remove('is-dragging');
+
+  if (event?.pointerId !== undefined && renderer.domElement.hasPointerCapture(event.pointerId)) {
+    renderer.domElement.releasePointerCapture(event.pointerId);
+  }
+
+  updateInteractivePartTransform(part);
+  refreshTargetVisuals();
+  updateStatusForState();
+  updateCanvasCursor();
+}
+
 function cacheSnapTargetWorldPositions() {
-  for (const target of [...arduinoTargets, ...breadboardTargets]) {
+  for (const target of getAllSnapTargets()) {
     target.userData.worldPosition = target.getWorldPosition(new THREE.Vector3());
   }
 }
 
 function updateHandleVisuals() {
-  if (!wireStartPlug || !endPlug) {
-    return;
+  const pulse = 1 + Math.sin(clock.getElapsedTime() * 4.25) * 0.06;
+
+  for (const wire of interactiveWires) {
+    const startHalo = wire.startPlug?.userData.halo;
+    const endHalo = wire.endPlug?.userData.halo;
+
+    if (!startHalo || !endHalo) {
+      continue;
+    }
+
+    const startHighlighted =
+      (wireState.dragging && wireState.activeWire === wire && wireState.draggedEnd === 'start') ||
+      (wireState.hoveredWire === wire && wireState.hoveredEnd === 'start');
+    const endHighlighted =
+      (wireState.dragging && wireState.activeWire === wire && wireState.draggedEnd === 'end') ||
+      (wireState.hoveredWire === wire && wireState.hoveredEnd === 'end');
+
+    const startConnected = Boolean(wire.startSnappedTarget);
+    const endConnected = Boolean(wire.endSnappedTarget);
+
+    startHalo.material.color.setHex(startConnected ? 0xffb36a : 0x40d6b1);
+    startHalo.material.emissive.setHex(startConnected ? 0xff8b2b : 0x40d6b1);
+    startHalo.material.opacity =
+      wireState.dragging && wireState.activeWire === wire && wireState.draggedEnd === 'start'
+        ? 0.34
+        : startHighlighted
+          ? 0.25
+          : 0.14;
+    startHalo.scale.setScalar((startConnected ? 1.1 : 1) * pulse);
+
+    endHalo.material.color.setHex(endConnected ? 0xffb36a : 0x7ed2ff);
+    endHalo.material.emissive.setHex(endConnected ? 0xff8b2b : 0x7ed2ff);
+    endHalo.material.opacity =
+      wireState.dragging && wireState.activeWire === wire && wireState.draggedEnd === 'end'
+        ? 0.34
+        : endHighlighted
+          ? 0.25
+          : 0.14;
+    endHalo.scale.setScalar((endConnected ? 1.1 : 1) * pulse);
   }
 
-  const pulse = 1 + Math.sin(clock.getElapsedTime() * 4.25) * 0.06;
-  const startHalo = wireStartPlug.userData.halo;
-  const endHalo = endPlug.userData.halo;
+  for (const part of placedParts) {
+    const startHandle = part.userData.startHandle;
+    const endHandle = part.userData.endHandle;
 
-  const startHighlighted =
-    (wireState.dragging && wireState.draggedEnd === 'start') || wireState.hoveredHandle === 'start';
-  const endHighlighted =
-    (wireState.dragging && wireState.draggedEnd === 'end') || wireState.hoveredHandle === 'end';
+    if (!startHandle || !endHandle) {
+      continue;
+    }
 
-  const startConnected = Boolean(wireState.startSnappedTarget);
-  const endConnected = Boolean(wireState.endSnappedTarget);
+    const startActive =
+      (partLeadState.dragging &&
+        partLeadState.activePart === part &&
+        partLeadState.draggedEnd === 'start') ||
+      (partLeadState.hoveredPart === part && partLeadState.hoveredEnd === 'start');
+    const endActive =
+      (partLeadState.dragging &&
+        partLeadState.activePart === part &&
+        partLeadState.draggedEnd === 'end') ||
+      (partLeadState.hoveredPart === part && partLeadState.hoveredEnd === 'end');
+    const startSnapped = Boolean(part.userData.startSnappedTarget);
+    const endSnapped = Boolean(part.userData.endSnappedTarget);
 
-  startHalo.material.color.setHex(startConnected ? 0xffb36a : 0x40d6b1);
-  startHalo.material.emissive.setHex(startConnected ? 0xff8b2b : 0x40d6b1);
-  startHalo.material.opacity = wireState.dragging && wireState.draggedEnd === 'start' ? 0.34 : startHighlighted ? 0.25 : 0.14;
-  startHalo.scale.setScalar((startConnected ? 1.1 : 1) * pulse);
+    setPartLeadVisualState(startHandle, startActive, startSnapped);
+    setPartLeadVisualState(endHandle, endActive, endSnapped);
 
-  endHalo.material.color.setHex(endConnected ? 0xffb36a : 0x7ed2ff);
-  endHalo.material.emissive.setHex(endConnected ? 0xff8b2b : 0x7ed2ff);
-  endHalo.material.opacity = wireState.dragging && wireState.draggedEnd === 'end' ? 0.34 : endHighlighted ? 0.25 : 0.14;
-  endHalo.scale.setScalar((endConnected ? 1.1 : 1) * pulse);
+    startHandle.userData.halo.scale.setScalar(
+      (startSnapped ? 1.08 : 1) * (1 + Math.sin(clock.getElapsedTime() * 4.25) * 0.04)
+    );
+    endHandle.userData.halo.scale.setScalar(
+      (endSnapped ? 1.08 : 1) * (1 + Math.sin(clock.getElapsedTime() * 4.25) * 0.04)
+    );
+  }
 }
 
 function updateStatusForState() {
-  if (wireState.dragging && wireState.hoveredTarget) {
-    const destination =
-      wireState.draggedEnd === 'start'
-        ? `Arduino ${wireState.hoveredTarget.userData.label}`
-        : `breadboard ${wireState.hoveredTarget.userData.label}`;
-    setStatus(`Release to connect the ${wireState.draggedEnd} plug to ${destination}.`);
+  if (partDragState.active) {
+    const definition = PART_DEFINITION_BY_KEY.get(partDragState.definitionKey);
+
+    if (partDragState.placementValid) {
+      setStatus(`Release to place the ${definition?.statusLabel ?? 'part'} on the breadboard.`);
+      return;
+    }
+
+    setStatus(`Drag the ${definition?.statusLabel ?? 'part'} onto the breadboard, then release to place it.`);
     return;
   }
 
-  if (wireState.dragging) {
-    const destination =
-      wireState.draggedEnd === 'start'
-        ? 'the Arduino pin hole'
-        : 'a glowing breadboard hole';
-    setStatus(`Release over ${destination} to snap the wire into place.`);
-    return;
-  }
-
-  if (wireState.startSnappedTarget && wireState.endSnappedTarget) {
+  if (partLeadState.dragging && partLeadState.hoveredTarget) {
+    const definition = PART_DEFINITION_BY_KEY.get(partLeadState.activePart?.userData.definitionKey);
+    const leadLabel = partLeadState.activePart
+      ? getPartLeadLabel(partLeadState.activePart, partLeadState.draggedEnd).toLowerCase()
+      : 'lead';
     setStatus(
-      `Connected: Arduino ${wireState.startSnappedTarget.userData.label} -> breadboard ${wireState.endSnappedTarget.userData.label}.`
+      `Release to connect the ${definition?.statusLabel ?? 'part'} ${leadLabel} to breadboard ${partLeadState.hoveredTarget.userData.label}.`
     );
     return;
   }
 
-  if (wireState.startSnappedTarget) {
-    setStatus('Ready: drag either wire plug to reposition the connection.');
+  if (partLeadState.dragging) {
+    const definition = PART_DEFINITION_BY_KEY.get(partLeadState.activePart?.userData.definitionKey);
+    const leadLabel = partLeadState.activePart
+      ? getPartLeadLabel(partLeadState.activePart, partLeadState.draggedEnd).toLowerCase()
+      : 'lead';
+    setStatus(
+      `Release over a glowing breadboard hole to snap the ${definition?.statusLabel ?? 'part'} ${leadLabel}.`
+    );
     return;
   }
 
-  setStatus('Ready: drag either wire plug to the Arduino or breadboard hole you want.');
+  if (wireState.dragging && wireState.hoveredTarget) {
+    setStatus(
+      `Release to connect the ${wireState.draggedEnd} plug to ${buildTargetConnectionLabel(wireState.hoveredTarget)}.`
+    );
+    return;
+  }
+
+  if (wireState.dragging) {
+    setStatus('Release over a glowing Arduino or breadboard hole to snap the wire into place.');
+    return;
+  }
+
+  const latestFullyConnectedWire = getLatestConnectedWire(true);
+
+  if (latestFullyConnectedWire) {
+    const connectedWireCount = interactiveWires.filter(
+      (wire) => wire.startSnappedTarget && wire.endSnappedTarget
+    ).length;
+    const prefix = connectedWireCount > 1 ? `${connectedWireCount} wires connected. Last: ` : 'Connected: ';
+
+    setStatus(
+      `${prefix}${buildTargetConnectionLabel(latestFullyConnectedWire.startSnappedTarget)} -> ${buildTargetConnectionLabel(latestFullyConnectedWire.endSnappedTarget)}.`
+    );
+    return;
+  }
+
+  if (getLatestConnectedWire()) {
+    setStatus(
+      placedParts.length > 0
+        ? 'Ready: drag any wire plug or component lead to reposition the circuit.'
+        : 'Ready: drag any wire plug to reposition the connection or add another wire.'
+    );
+    return;
+  }
+
+  setStatus(
+    placedParts.length > 0
+      ? 'Ready: drag any wire plug or component lead to the hole you want.'
+      : 'Ready: drag any wire plug to the Arduino or breadboard hole you want.'
+  );
 }
 
-function updateWireGeometry() {
-  if (!cableMesh || !wireStartPlug || !endPlug) {
+function updateWireGeometry(wire) {
+  if (!wire?.cableMesh || !wire.startPlug || !wire.endPlug) {
     return;
   }
 
   copyStateToVector(positionState.wire, tempWireOffset);
 
-  const startTip = tempStartTip.copy(wireState.startTip).add(tempWireOffset);
-  const endTip = tempEndTip.copy(wireState.endTip).add(tempWireOffset);
-  const startNormal = getPlugSurfaceNormal('start', tempNormal);
-  const endNormal = getPlugSurfaceNormal('end', tempNormalB);
+  const startTip = tempStartTip.copy(wire.startTip).add(tempWireOffset);
+  const endTip = tempEndTip.copy(wire.endTip).add(tempWireOffset);
+  startTip.y -= wire.startInsertionDepth;
+  endTip.y -= wire.endInsertionDepth;
+  const startNormal = getPlugSurfaceNormal(wire, 'start', tempNormal);
+  const endNormal = getPlugSurfaceNormal(wire, 'end', tempNormalB);
 
-  wireStartPlug.position.copy(startTip);
+  wire.startPlug.position.copy(startTip);
   // Each plug should stand off from the board surface; the cable then bends
   // between the strain-relief exits instead of deciding the plug direction.
-  wireStartPlug.quaternion.setFromUnitVectors(startPlugSurfaceAxis, startNormal);
-  wireStartPlug.quaternion.multiply(wireStartRotationOffset);
+  wire.startPlug.quaternion.setFromUnitVectors(startPlugSurfaceAxis, startNormal);
+  wire.startPlug.quaternion.multiply(wireStartRotationOffset);
 
-  endPlug.position.copy(endTip);
-  endPlug.quaternion.setFromUnitVectors(endPlugSurfaceAxis, endNormal);
-  endPlug.quaternion.multiply(wireEndRotationOffset);
+  wire.endPlug.position.copy(endTip);
+  wire.endPlug.quaternion.setFromUnitVectors(endPlugSurfaceAxis, endNormal);
+  wire.endPlug.quaternion.multiply(wireEndRotationOffset);
 
   tempCableStart.set(0, CABLE_EXIT_OFFSET, 0);
-  wireStartPlug.localToWorld(tempCableStart);
+  wire.startPlug.localToWorld(tempCableStart);
   tempCableEnd.set(0, CABLE_EXIT_OFFSET, 0);
-  endPlug.localToWorld(tempCableEnd);
+  wire.endPlug.localToWorld(tempCableEnd);
 
   const cableDistance = tempCableStart.distanceTo(tempCableEnd);
   const lift = THREE.MathUtils.clamp(cableDistance * 0.18, 8, 24);
@@ -1516,8 +3257,8 @@ function updateWireGeometry() {
   ]);
 
   const nextGeometry = new THREE.TubeGeometry(curve, 42, CABLE_RADIUS, 14, false);
-  cableMesh.geometry.dispose();
-  cableMesh.geometry = nextGeometry;
+  wire.cableMesh.geometry.dispose();
+  wire.cableMesh.geometry = nextGeometry;
 }
 
 function findNearestTarget(point, targets) {
@@ -1569,25 +3310,39 @@ function frameScene(object) {
 }
 
 function updateCanvasCursor() {
+  if (partDragState.active) {
+    setCanvasCursor(partDragState.placementValid ? 'copy' : 'grabbing');
+    return;
+  }
+
+  if (partLeadState.dragging) {
+    setCanvasCursor('grabbing');
+    return;
+  }
+
   if (wireState.dragging) {
     setCanvasCursor('grabbing');
     return;
   }
 
-  setCanvasCursor(wireState.hoveredHandle ? 'grab' : 'default');
+  setCanvasCursor(wireState.hoveredWire || partLeadState.hoveredPart ? 'grab' : 'default');
 }
 
-function beginDrag(event, draggedEnd) {
+function beginDrag(wire, event, draggedEnd) {
   event.preventDefault();
   wireState.dragging = true;
+  wireState.activeWire = wire;
   wireState.draggedEnd = draggedEnd;
-  wireState.hoveredHandle = null;
+  wireState.hoveredWire = null;
+  wireState.hoveredEnd = null;
   wireState.hoveredTarget = null;
 
   if (draggedEnd === 'start') {
-    wireState.startSnappedTarget = null;
+    wire.startSnappedTarget = null;
+    wire.startInsertionDepth = 0;
   } else {
-    wireState.endSnappedTarget = null;
+    wire.endSnappedTarget = null;
+    wire.endInsertionDepth = 0;
   }
 
   controls.enabled = false;
@@ -1600,7 +3355,9 @@ function beginDrag(event, draggedEnd) {
 }
 
 function finishDrag(event) {
-  if (!wireState.dragging) {
+  const wire = wireState.activeWire;
+
+  if (!wireState.dragging || !wire) {
     return;
   }
 
@@ -1609,19 +3366,22 @@ function finishDrag(event) {
 
   if (wireState.hoveredTarget) {
     if (draggedEnd === 'start') {
-      wireState.startSnappedTarget = wireState.hoveredTarget;
-      wireState.startTip.copy(wireState.hoveredTarget.userData.worldPosition);
+      wire.startSnappedTarget = wireState.hoveredTarget;
+      wire.startTip.copy(wireState.hoveredTarget.userData.worldPosition);
+      wire.startInsertionDepth = PLUG_INSERTION_DEPTH;
     } else {
-      wireState.endSnappedTarget = wireState.hoveredTarget;
-      wireState.endTip.copy(wireState.hoveredTarget.userData.worldPosition);
+      wire.endSnappedTarget = wireState.hoveredTarget;
+      wire.endTip.copy(wireState.hoveredTarget.userData.worldPosition);
+      wire.endInsertionDepth = PLUG_INSERTION_DEPTH;
     }
 
     if (wireState.hoveredTarget.userData.surfaceKey) {
-      setSurfaceKeyForEnd(draggedEnd, wireState.hoveredTarget.userData.surfaceKey);
+      setSurfaceKeyForEnd(wire, draggedEnd, wireState.hoveredTarget.userData.surfaceKey);
     }
   }
 
   wireState.draggedEnd = null;
+  wireState.hoveredTarget = null;
   controls.enabled = true;
   document.body.classList.remove('is-dragging');
 
@@ -1632,58 +3392,116 @@ function finishDrag(event) {
   refreshTargetVisuals();
   updateStatusForState();
   updateCanvasCursor();
-  updateWireGeometry();
+  updateWireGeometry(wire);
 }
 
 function onPointerDown(event) {
-  if (!startPlugHitArea || !endPlugHitArea) {
+  if (partDragState.active) {
+    return;
+  }
+
+  const hitAreas = [...getAllWireHitAreas(), ...getAllPartLeadHitAreas()];
+
+  if (hitAreas.length === 0) {
     return;
   }
 
   updatePointerFromEvent(event);
   raycaster.setFromCamera(pointer, camera);
 
-  const intersections = raycaster.intersectObjects([startPlugHitArea, endPlugHitArea], false);
+  const intersections = raycaster.intersectObjects(hitAreas, false);
   if (intersections.length > 0) {
-    const draggedEnd =
-      intersections[0].object === startPlugHitArea ? 'start' : 'end';
-    beginDrag(event, draggedEnd);
+    const { wire, part, endKey, interactionType } = intersections[0].object.userData;
+
+    if (interactionType === 'partLead' && part && endKey) {
+      beginPartLeadDrag(part, event, endKey);
+      return;
+    }
+
+    if (wire && endKey) {
+      beginDrag(wire, event, endKey);
+    }
   }
 }
 
 function onPointerMove(event) {
+  if (partDragState.active) {
+    return;
+  }
+
   updatePointerFromEvent(event);
   raycaster.setFromCamera(pointer, camera);
 
+  if (partLeadState.dragging) {
+    const part = partLeadState.activePart;
+
+    if (!part || !getClampedPointOnSurfaceFromRay(raycaster.ray, 'breadboardSurface', tempPoint)) {
+      partLeadState.hoveredTarget = null;
+      refreshTargetVisuals();
+      updateStatusForState();
+      updateCanvasCursor();
+      return;
+    }
+
+    const nearestTarget = findNearestTarget(tempPoint, breadboardTargets);
+    partLeadState.hoveredTarget = nearestTarget;
+
+    if (nearestTarget) {
+      tempPartLocalPoint.copy(nearestTarget.userData.worldPosition);
+    } else {
+      tempPartLocalPoint.copy(tempPoint);
+    }
+
+    breadboardPartsRoot.worldToLocal(tempPartLocalPoint);
+
+    if (partLeadState.draggedEnd === 'start') {
+      part.userData.startLeadPositionLocal.copy(tempPartLocalPoint);
+    } else {
+      part.userData.endLeadPositionLocal.copy(tempPartLocalPoint);
+    }
+
+    updateInteractivePartTransform(part);
+    refreshTargetVisuals();
+    updateStatusForState();
+    updateCanvasCursor();
+    return;
+  }
+
   if (wireState.dragging) {
+    const wire = wireState.activeWire;
+
+    if (!wire) {
+      return;
+    }
+
     const clampedSurfaceKey = getClampedDragPointForEnd(
+      wire,
       wireState.draggedEnd,
       raycaster.ray,
       tempPoint
     );
 
     if (clampedSurfaceKey) {
-      setSurfaceKeyForEnd(wireState.draggedEnd, clampedSurfaceKey);
+      setSurfaceKeyForEnd(wire, wireState.draggedEnd, clampedSurfaceKey);
 
       const dragPoint = tempPointB.copy(tempPoint).sub(
         copyStateToVector(positionState.wire, tempWireOffset)
       );
-      const availableTargets =
-        wireState.draggedEnd === 'start' ? arduinoTargets : breadboardTargets;
+      const availableTargets = getAllSnapTargets();
       const nearestTarget = findNearestTarget(dragPoint, availableTargets);
       wireState.hoveredTarget = nearestTarget;
 
       if (nearestTarget) {
         if (wireState.draggedEnd === 'start') {
-          wireState.startTip.copy(nearestTarget.userData.worldPosition);
+          wire.startTip.copy(nearestTarget.userData.worldPosition);
         } else {
-          wireState.endTip.copy(nearestTarget.userData.worldPosition);
+          wire.endTip.copy(nearestTarget.userData.worldPosition);
         }
       } else {
         if (wireState.draggedEnd === 'start') {
-          wireState.startTip.copy(dragPoint);
+          wire.startTip.copy(dragPoint);
         } else {
-          wireState.endTip.copy(dragPoint);
+          wire.endTip.copy(dragPoint);
         }
       }
 
@@ -1693,7 +3511,7 @@ function onPointerMove(event) {
         updateBreadboardDragPlane();
       }
 
-      updateWireGeometry();
+      updateWireGeometry(wire);
       refreshTargetVisuals();
       updateStatusForState();
     }
@@ -1702,17 +3520,48 @@ function onPointerMove(event) {
     return;
   }
 
-  const intersections = raycaster.intersectObjects([startPlugHitArea, endPlugHitArea], false);
-  wireState.hoveredHandle =
-    intersections.length === 0
-      ? null
-      : intersections[0].object === startPlugHitArea
-        ? 'start'
-        : 'end';
+  const intersections = raycaster.intersectObjects(
+    [...getAllWireHitAreas(), ...getAllPartLeadHitAreas()],
+    false
+  );
+  const hoveredObject = intersections[0]?.object?.userData ?? null;
+
+  if (hoveredObject?.interactionType === 'partLead') {
+    wireState.hoveredWire = null;
+    wireState.hoveredEnd = null;
+    partLeadState.hoveredPart = hoveredObject.part ?? null;
+    partLeadState.hoveredEnd = hoveredObject.endKey ?? null;
+  } else {
+    partLeadState.hoveredPart = null;
+    partLeadState.hoveredEnd = null;
+    wireState.hoveredWire = hoveredObject?.wire ?? null;
+    wireState.hoveredEnd = hoveredObject?.endKey ?? null;
+  }
+
   updateCanvasCursor();
 }
 
+function onWindowPointerMove(event) {
+  if (!partDragState.active || partDragState.pointerId !== event.pointerId) {
+    return;
+  }
+
+  partDragState.clientX = event.clientX;
+  partDragState.clientY = event.clientY;
+  updatePartDragPreview(event);
+}
+
 function onPointerUp(event) {
+  if (partDragState.active) {
+    finishPartDrag(event);
+    return;
+  }
+
+  if (partLeadState.dragging) {
+    finishPartLeadDrag(event);
+    return;
+  }
+
   finishDrag(event);
 }
 
@@ -1723,9 +3572,10 @@ function onWindowResize() {
 }
 
 async function init() {
-  const [arduinoGltf, breadboardGltf] = await Promise.all([
+  const [arduinoGltf, breadboardGltf, ...partGltfs] = await Promise.all([
     loadModel('/models/uno_simulator/Arduino_Uno_R3.glb'),
     loadModel('/models/uno_simulator/Half-Size+Breadboard.glb'),
+    ...PART_DEFINITIONS.map((definition) => loadModel(definition.modelUrl)),
   ]);
 
   const arduinoModel = normalizeModel(arduinoGltf.scene);
@@ -1738,6 +3588,10 @@ async function init() {
   arduino = arduinoRig.adjustment;
   breadboard = breadboardRig.adjustment;
 
+  for (const [index, definition] of PART_DEFINITIONS.entries()) {
+    partModelCache.set(definition.key, normalizeModel(partGltfs[index].scene));
+  }
+
   assembly.add(arduinoRigRoot, breadboardRigRoot);
 
   const arduinoSize = arduino.userData.size;
@@ -1748,7 +3602,7 @@ async function init() {
   arduinoHeaderLeft = new THREE.Group();
   arduino.add(arduinoHeaderLeft);
 
-  const arduinoHeaderLeftContent = new THREE.Group();
+  arduinoHeaderLeftContent = new THREE.Group();
   arduinoHeaderLeftContent.position.set(
     arduinoHeaderBaseX,
     arduinoHeaderSurfaceY,
@@ -1762,13 +3616,14 @@ async function init() {
     0x38e2d0,
     0x0f9f91
   );
+  arduinoHeaderLeftGuide.visible = false;
   surfaceGuides.set('arduinoHeaderLeft', arduinoHeaderLeftGuide);
   arduinoHeaderLeftContent.add(arduinoHeaderLeftGuide);
 
   arduinoHeaderRight = new THREE.Group();
   arduino.add(arduinoHeaderRight);
 
-  const arduinoHeaderRightContent = new THREE.Group();
+  arduinoHeaderRightContent = new THREE.Group();
   arduinoHeaderRightContent.position.set(
     arduinoHeaderBaseX,
     arduinoHeaderSurfaceY,
@@ -1782,18 +3637,26 @@ async function init() {
     0xfcc15a,
     0xd97706
   );
+  arduinoHeaderRightGuide.visible = false;
   surfaceGuides.set('arduinoHeaderRight', arduinoHeaderRightGuide);
   arduinoHeaderRightContent.add(arduinoHeaderRightGuide);
 
-  startAnchor = createSnapTarget(ARDUINO_PIN_LABEL);
-  startAnchor.position.set(
-    arduinoSize.x * 0.18,
-    arduinoSize.y - 2.8,
-    -arduinoSize.z * 0.2
-  );
-  startAnchor.userData.surfaceKey = 'arduinoHeaderLeft';
-  arduino.add(startAnchor);
-  arduinoTargets = [startAnchor];
+  arduinoTargets = [];
+  arduinoHeaderGroupRoots.clear();
+
+  for (const definition of ARDUINO_HEADER_GROUP_DEFINITIONS) {
+    const parent =
+      definition.surfaceKey === 'arduinoHeaderLeft'
+        ? arduinoHeaderLeftContent
+        : arduinoHeaderRightContent;
+    createArduinoHeaderGroup(parent, arduinoTargets, definition);
+  }
+
+  startAnchor =
+    arduinoTargets.find(
+      (target) =>
+        target.userData.groupKey === 'arduinoHeaderLeftGroup1' && target.userData.pinIndex === 3
+    ) ?? arduinoTargets[0];
 
   const breadboardSize = breadboard.userData.size;
   const topY = breadboardSize.y + 0.25;
@@ -1811,80 +3674,56 @@ async function init() {
     0xff4fa3,
     0xff2d86
   );
+  breadboardSurfaceGuide.visible = false;
   surfaceGuides.set('breadboardSurface', breadboardSurfaceGuide);
   breadboardSurfaceContent.add(breadboardSurfaceGuide);
 
+  breadboardPartsRoot = new THREE.Group();
+  breadboardSurfaceContent.add(breadboardPartsRoot);
+
   breadboardTargets = [];
+  powerRailGroupRoots.clear();
   for (let rowIndex = 0; rowIndex < BREADBOARD_TERMINAL_COLUMNS; rowIndex += 1) {
     const z = BREADBOARD_COLUMN_START + rowIndex * BREADBOARD_PITCH;
 
     for (let columnIndex = 0; columnIndex < BREADBOARD_LEFT_ROW_LABELS.length; columnIndex += 1) {
-      const target = createSnapTarget(`${BREADBOARD_LEFT_ROW_LABELS[columnIndex]}${rowIndex + 1}`);
-      target.position.set(
+      addBreadboardSnapTarget(
+        breadboardSurfaceContent,
+        breadboardTargets,
+        `${BREADBOARD_LEFT_ROW_LABELS[columnIndex]}${rowIndex + 1}`,
         BREADBOARD_LEFT_ROW_START + columnIndex * BREADBOARD_PITCH,
-        0,
         z
       );
-      target.userData.surfaceKey = 'breadboardSurface';
-      breadboardSurfaceContent.add(target);
-      breadboardTargets.push(target);
     }
 
     for (let columnIndex = 0; columnIndex < BREADBOARD_RIGHT_ROW_LABELS.length; columnIndex += 1) {
-      const target = createSnapTarget(`${BREADBOARD_RIGHT_ROW_LABELS[columnIndex]}${rowIndex + 1}`);
-      target.position.set(
+      addBreadboardSnapTarget(
+        breadboardSurfaceContent,
+        breadboardTargets,
+        `${BREADBOARD_RIGHT_ROW_LABELS[columnIndex]}${rowIndex + 1}`,
         BREADBOARD_RIGHT_ROW_START + columnIndex * BREADBOARD_PITCH,
-        0,
         z
       );
-      target.userData.surfaceKey = 'breadboardSurface';
-      breadboardSurfaceContent.add(target);
-      breadboardTargets.push(target);
     }
   }
 
-  wireAssembly = createWireAssembly();
-  assembly.add(wireAssembly);
+  for (const definition of POWER_RAIL_GROUP_DEFINITIONS) {
+    createPowerRailGroup(breadboardSurfaceContent, breadboardTargets, definition);
+  }
 
-  wireStartPlug = wireAssembly.userData.startPlug;
-  startPlugHitArea = wireStartPlug.userData.hitArea;
-  cableMesh = wireAssembly.userData.cableMesh;
-  endPlug = wireAssembly.userData.endPlug;
-  endPlugHitArea = endPlug.userData.hitArea;
-
-  wireState.startSnappedTarget = startAnchor;
   applyDebugTransforms();
-
-  let defaultTarget = breadboardTargets[0];
-  let nearestDistance = Infinity;
-
-  for (const target of breadboardTargets) {
-    const distance = wireState.startTip.distanceTo(target.userData.worldPosition);
-
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      defaultTarget = target;
-    }
-  }
-
-  wireState.endTip.copy(defaultTarget.userData.worldPosition);
-  getTargetWorldNormal(defaultTarget, tempBreadboardNormal);
-  wireState.endTip.addScaledVector(tempBreadboardNormal, 10);
-  wireState.endTip.addScaledVector(
-    tempDirection.set(0, 0, 1).transformDirection(defaultTarget.matrixWorld),
-    3.5
-  );
-
-  updateBreadboardDragPlane();
-
-  refreshTargetVisuals();
-  updateWireGeometry();
+  const primaryWire = createInteractiveWire({ isPrimary: true });
+  interactiveWires.push(primaryWire);
+  assembly.add(primaryWire.assembly);
+  wireState.activeWire = primaryWire;
+  initializePrimaryWire(primaryWire);
+  syncInteractiveTransforms();
   updateHandleVisuals();
-  updateStatusForState();
   frameScene(assembly);
 
   renderer.domElement.addEventListener('pointerdown', onPointerDown);
   renderer.domElement.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointermove', onWindowPointerMove);
   window.addEventListener('pointerup', onPointerUp);
   window.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('resize', onWindowResize);
