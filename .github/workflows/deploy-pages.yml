@@ -28,23 +28,23 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: three-box-demo/package-lock.json
+          cache-dependency-path: arduinosimulator3d/package-lock.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
       - name: Install dependencies
-        working-directory: three-box-demo
+        working-directory: arduinosimulator3d
         run: npm ci
 
       - name: Build project for GitHub Pages
-        working-directory: three-box-demo
+        working-directory: arduinosimulator3d
         run: npm run build:pages
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./three-box-demo/dist
+          path: ./arduinosimulator3d/dist
 
   deploy:
     needs: build
