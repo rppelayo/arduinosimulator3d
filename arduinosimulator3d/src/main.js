@@ -575,8 +575,8 @@ applyPanelCollapseControl(partLeadPanel, {
 });
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xe7edf4);
-scene.fog = new THREE.Fog(0xe7edf4, 260, 520);
+scene.background = new THREE.Color(0xb8b1a4);
+scene.fog = new THREE.Fog(0xb8b1a4, 320, 760);
 
 const camera = new THREE.PerspectiveCamera(
   45,
@@ -590,11 +590,12 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.domElement.style.touchAction = 'none';
+renderer.physicallyCorrectLights = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
 appShell.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -620,6 +621,154 @@ function getRoundedCameraVector(vector, digits = 2) {
   };
 }
 
+function createRealisticWorkbenchEnvironment() {
+  const environment = new THREE.Group();
+
+  const WORKBENCH_SURFACE_Y = -1.2;
+  const DESK_HEIGHT = 14;
+  const MAT_HEIGHT = 0.8;
+
+  // Wooden / laminate workbench top
+  const deskMaterial = new THREE.MeshStandardMaterial({
+    color: 0x8a6a46,
+    roughness: 0.82,
+    metalness: 0.02,
+  });
+
+  const desk = new THREE.Mesh(
+    new THREE.BoxGeometry(520, DESK_HEIGHT, 320),
+    deskMaterial
+  );
+
+  // Keep desk and mat below the Arduino/breadboard base.
+  desk.position.y = WORKBENCH_SURFACE_Y - MAT_HEIGHT - DESK_HEIGHT / 2;
+  desk.receiveShadow = true;
+  environment.add(desk);
+
+  // Rubber cutting mat
+  const mat = new THREE.Mesh(
+    new THREE.BoxGeometry(360, MAT_HEIGHT, 210),
+    new THREE.MeshStandardMaterial({
+      color: 0x2f6f5e,
+      roughness: 0.88,
+      metalness: 0.01,
+    })
+  );
+
+  mat.position.set(15, WORKBENCH_SURFACE_Y - MAT_HEIGHT / 2, 0);
+  mat.receiveShadow = true;
+  environment.add(mat);
+
+  // Mat grid
+  const matGrid = new THREE.GridHelper(340, 17, 0x79a99a, 0x4f8577);
+  matGrid.position.set(15, WORKBENCH_SURFACE_Y + 0.03, 0);
+
+  const gridMaterials = Array.isArray(matGrid.material)
+    ? matGrid.material
+    : [matGrid.material];
+
+  for (const material of gridMaterials) {
+    material.transparent = true;
+    material.opacity = 0.18;
+    material.depthWrite = false;
+  }
+
+  environment.add(matGrid);
+
+  // Back wall
+  const wallMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd8d1c3,
+    roughness: 0.95,
+    metalness: 0.0,
+  });
+
+  const backWall = new THREE.Mesh(
+    new THREE.BoxGeometry(540, 220, 10),
+    wallMaterial
+  );
+  backWall.position.set(0, 95, -165);
+  backWall.receiveShadow = true;
+  environment.add(backWall);
+
+  // Side wall
+  const sideWall = new THREE.Mesh(
+    new THREE.BoxGeometry(10, 220, 320),
+    wallMaterial
+  );
+  sideWall.position.set(-265, 95, -5);
+  sideWall.receiveShadow = true;
+  environment.add(sideWall);
+
+  // Small background shelf
+  const shelf = new THREE.Mesh(
+    new THREE.BoxGeometry(300, 8, 35),
+    new THREE.MeshStandardMaterial({
+      color: 0x6f6256,
+      roughness: 0.75,
+      metalness: 0.03,
+    })
+  );
+  shelf.position.set(40, 95, -148);
+  shelf.castShadow = true;
+  shelf.receiveShadow = true;
+  environment.add(shelf);
+
+  // Background instrument
+  const instrument = new THREE.Mesh(
+    new THREE.BoxGeometry(70, 35, 28),
+    new THREE.MeshStandardMaterial({
+      color: 0x3c4652,
+      roughness: 0.7,
+      metalness: 0.1,
+    })
+  );
+  instrument.position.set(-65, 121, -130);
+  instrument.castShadow = true;
+  environment.add(instrument);
+
+  // Storage box
+  const storageBox = new THREE.Mesh(
+    new THREE.BoxGeometry(55, 28, 30),
+    new THREE.MeshStandardMaterial({
+      color: 0xb88b4a,
+      roughness: 0.78,
+      metalness: 0.02,
+    })
+  );
+  storageBox.position.set(35, 117, -130);
+  storageBox.castShadow = true;
+  environment.add(storageBox);
+
+  // Background cable lying on the workbench/mat
+  const cableRadius = 1.2;
+  const cableY = WORKBENCH_SURFACE_Y + cableRadius * 0.85;
+
+  const cableCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(125, cableY, -95),
+    new THREE.Vector3(150, cableY + 0.25, -70),
+    new THREE.Vector3(135, cableY + 0.1, -35),
+    new THREE.Vector3(165, cableY + 0.2, 10),
+  ]);
+
+  const cable = new THREE.Mesh(
+    new THREE.TubeGeometry(cableCurve, 32, cableRadius, 10, false),
+    new THREE.MeshStandardMaterial({
+      color: 0x222222,
+      roughness: 0.7,
+      metalness: 0.02,
+    })
+  );
+
+  cable.castShadow = true;
+  cable.receiveShadow = true;
+  environment.add(cable);
+
+  scene.add(environment);
+  return environment;
+}
+
+createRealisticWorkbenchEnvironment();
+
 function logCameraPose(label = 'Camera pose snapshot') {
   const position = getRoundedCameraVector(camera.position);
   const target = getRoundedCameraVector(controls.target);
@@ -642,44 +791,24 @@ controls.addEventListener('end', () => {
   logCameraPose('Camera pose updated');
 });
 
-const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x8aa1b8, 1.7);
+const hemisphereLight = new THREE.HemisphereLight(0xfff4df, 0x6d7c88, 1.25);
 scene.add(hemisphereLight);
 
-const keyLight = new THREE.DirectionalLight(0xffffff, 2.6);
-keyLight.position.set(120, 180, 90);
+const keyLight = new THREE.DirectionalLight(0xfff0d2, 2.2);
+keyLight.position.set(120, 190, 95);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(2048, 2048);
 keyLight.shadow.camera.near = 20;
 keyLight.shadow.camera.far = 500;
-keyLight.shadow.camera.left = -220;
-keyLight.shadow.camera.right = 220;
-keyLight.shadow.camera.top = 220;
-keyLight.shadow.camera.bottom = -220;
+keyLight.shadow.camera.left = -240;
+keyLight.shadow.camera.right = 240;
+keyLight.shadow.camera.top = 240;
+keyLight.shadow.camera.bottom = -240;
 scene.add(keyLight);
 
-const fillLight = new THREE.DirectionalLight(0xbdd8ff, 0.7);
+const fillLight = new THREE.DirectionalLight(0xb9d7ff, 0.45);
 fillLight.position.set(-140, 90, -120);
 scene.add(fillLight);
-
-const desk = new THREE.Mesh(
-  new THREE.BoxGeometry(430, 12, 250),
-  new THREE.MeshStandardMaterial({
-    color: 0xc6d4df,
-    roughness: 0.92,
-    metalness: 0.02,
-  })
-);
-desk.position.y = -6;
-desk.receiveShadow = true;
-scene.add(desk);
-
-const grid = new THREE.GridHelper(380, 16, 0x8ca0b4, 0xcdd8e2);
-grid.position.y = 0.12;
-for (const material of Array.isArray(grid.material) ? grid.material : [grid.material]) {
-  material.transparent = true;
-  material.opacity = 0.18;
-}
-scene.add(grid);
 
 const assembly = new THREE.Group();
 scene.add(assembly);
