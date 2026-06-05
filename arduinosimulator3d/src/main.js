@@ -24,6 +24,23 @@ const SURFACE_SIZE_LIMIT = 220;
 const BREADBOARD_TERMINAL_COLUMNS = 30;
 const CABLE_STRAIN_RELIEF_LENGTH = 6.5;
 const CABLE_END_BEND_LIFT = 2.0;
+const DEFAULT_WIRE_COLOR = 0xff6d2e;
+const RANDOM_WIRE_COLOR_PALETTE = [
+  0xef4444,
+  0xf97316,
+  0xfacc15,
+  0x22c55e,
+  0x14b8a6,
+  0x38bdf8,
+  0x6366f1,
+  0xa855f7,
+  0xec4899,
+];
+const LOOSE_WIRE_SPAWN_LIFT = 8.5;
+const LOOSE_WIRE_SPAWN_HALF_SPAN = 11.5;
+const LOOSE_WIRE_SPAWN_SKEW = 4.5;
+const LOOSE_WIRE_SPAWN_COLUMNS = 3;
+const LOOSE_WIRE_SPAWN_ROWS = 3;
 const ENABLE_PART_LEAD_REDRAG = false;
 const PART_ROTATION_STEP_DEGREES = 45;
 const PART_REDRAG_SNAP_END = 'start';
@@ -4201,9 +4218,14 @@ function createDupontPlug(includeHandle = false) {
   return group;
 }
 
-function createCableMesh() {
+function getRandomWireColorHex() {
+  const randomIndex = Math.floor(Math.random() * RANDOM_WIRE_COLOR_PALETTE.length);
+  return RANDOM_WIRE_COLOR_PALETTE[randomIndex] ?? DEFAULT_WIRE_COLOR;
+}
+
+function createCableMesh(color = DEFAULT_WIRE_COLOR) {
   const material = new THREE.MeshStandardMaterial({
-    color: 0xff6d2e,
+    color,
     roughness: 0.55,
     metalness: 0.02,
   });
@@ -4223,12 +4245,12 @@ function createCableMesh() {
   return mesh;
 }
 
-function createWireAssembly(includeHandles = true) {
+function createWireAssembly(includeHandles = true, color = DEFAULT_WIRE_COLOR) {
   const group = new THREE.Group();
 
   const startPlug = createDupontPlug(includeHandles);
   const freePlug = createDupontPlug(includeHandles);
-  const cable = createCableMesh();
+  const cable = createCableMesh(color);
 
   group.add(cable, startPlug, freePlug);
 
@@ -4240,7 +4262,9 @@ function createWireAssembly(includeHandles = true) {
 }
 
 function createInteractiveWire(options = {}) {
-  const assembly = createWireAssembly(true);
+  const wireColor =
+    options.cableColor ?? (options.isPrimary ? DEFAULT_WIRE_COLOR : getRandomWireColorHex());
+  const assembly = createWireAssembly(true, wireColor);
   const wire = {
     assembly,
     startPlug: assembly.userData.startPlug,
@@ -4248,6 +4272,7 @@ function createInteractiveWire(options = {}) {
     startHitArea: assembly.userData.startPlug.userData.hitArea,
     endHitArea: assembly.userData.endPlug.userData.hitArea,
     cableMesh: assembly.userData.cableMesh,
+    cableColor: wireColor,
     isPrimary: Boolean(options.isPrimary),
     startSnappedTarget: null,
     endSnappedTarget: null,
@@ -4326,8 +4351,56 @@ function initializeLooseWire(wire, index) {
   wire.endSurfaceKey = 'breadboardSurface';
   wire.startInsertionDepth = 0;
   wire.endInsertionDepth = 0;
-  wire.startTip.set(baseX - 14, WORKSPACE_WIRE_BASE_HEIGHT, baseZ - 5);
-  wire.endTip.set(baseX + 14, WORKSPACE_WIRE_BASE_HEIGHT, baseZ + 5);
+
+  const surfaceGuide = getSurfaceGuide('breadboardSurface');
+
+  if (!surfaceGuide) {
+    wire.startTip.set(baseX - 14, WORKSPACE_WIRE_BASE_HEIGHT, baseZ - 5);
+    wire.endTip.set(baseX + 14, WORKSPACE_WIRE_BASE_HEIGHT, baseZ + 5);
+    return;
+  }
+
+  surfaceGuide.updateMatrixWorld(true);
+
+  const surfaceWidth =
+    surfaceSizeState.breadboardSurface?.width ?? DEFAULT_SURFACE_SIZES.breadboardSurface.width;
+  const surfaceDepth =
+    surfaceSizeState.breadboardSurface?.depth ?? DEFAULT_SURFACE_SIZES.breadboardSurface.depth;
+  const spawnColumn = index % LOOSE_WIRE_SPAWN_COLUMNS;
+  const spawnRow = Math.floor(index / LOOSE_WIRE_SPAWN_COLUMNS) % LOOSE_WIRE_SPAWN_ROWS;
+  const localX =
+    LOOSE_WIRE_SPAWN_COLUMNS === 1
+      ? 0
+      : THREE.MathUtils.lerp(
+          -surfaceWidth * 0.22,
+          surfaceWidth * 0.22,
+          spawnColumn / (LOOSE_WIRE_SPAWN_COLUMNS - 1)
+        );
+  const localZ =
+    LOOSE_WIRE_SPAWN_ROWS === 1
+      ? 0
+      : THREE.MathUtils.lerp(
+          surfaceDepth * 0.2,
+          -surfaceDepth * 0.2,
+          spawnRow / (LOOSE_WIRE_SPAWN_ROWS - 1)
+        );
+
+  tempPoint.set(localX, 0, localZ);
+  surfaceGuide.localToWorld(tempPoint);
+
+  getSurfaceNormal('breadboardSurface', tempBreadboardNormal);
+  tempPoint.addScaledVector(tempBreadboardNormal, LOOSE_WIRE_SPAWN_LIFT);
+
+  tempDirection.set(1, 0, 0).transformDirection(surfaceGuide.matrixWorld).normalize();
+  tempNormalB.set(0, 0, 1).transformDirection(surfaceGuide.matrixWorld).normalize();
+
+  wire.startTip.copy(tempPoint);
+  wire.startTip.addScaledVector(tempDirection, -LOOSE_WIRE_SPAWN_HALF_SPAN);
+  wire.startTip.addScaledVector(tempNormalB, -LOOSE_WIRE_SPAWN_SKEW);
+
+  wire.endTip.copy(tempPoint);
+  wire.endTip.addScaledVector(tempDirection, LOOSE_WIRE_SPAWN_HALF_SPAN);
+  wire.endTip.addScaledVector(tempNormalB, LOOSE_WIRE_SPAWN_SKEW);
 }
 
 function addInteractiveWire() {
