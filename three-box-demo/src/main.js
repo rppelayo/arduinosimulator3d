@@ -359,6 +359,14 @@ console.table(
   }))
 );
 
+function resolvePublicAssetUrl(path) {
+  if (/^(?:[a-z]+:)?\/\//i.test(path)) {
+    return path;
+  }
+
+  return `${import.meta.env.BASE_URL}${String(path).replace(/^\/+/, '')}`;
+}
+
 const appShell = document.createElement('div');
 appShell.className = 'app-shell';
 document.body.appendChild(appShell);
@@ -3850,7 +3858,7 @@ function applyArduinoHeaderGroupTransforms() {
 
 function loadModel(url) {
   return new Promise((resolve, reject) => {
-    loader.load(url, resolve, undefined, reject);
+    loader.load(resolvePublicAssetUrl(url), resolve, undefined, reject);
   });
 }
 
