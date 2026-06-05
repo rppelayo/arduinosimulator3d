@@ -28,20 +28,23 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: three-box-demo/package-lock.json
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
       - name: Install dependencies
+        working-directory: three-box-demo
         run: npm ci
 
       - name: Build project for GitHub Pages
+        working-directory: three-box-demo
         run: npm run build:pages
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: ./three-box-demo/dist
 
   deploy:
     needs: build
