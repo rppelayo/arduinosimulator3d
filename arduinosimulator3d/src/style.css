@@ -126,6 +126,15 @@ canvas {
   max-height: calc(100vh - 182px);
 }
 
+.debug-panel--part-model {
+  top: auto;
+  left: 18px;
+  right: auto;
+  bottom: 18px;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(42vh, 360px);
+}
+
 .debug-panel--parts {
   top: auto;
   right: 18px;
@@ -420,6 +429,11 @@ canvas {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(239, 246, 255, 0.78));
 }
 
+.connection-card--placement {
+  border-color: rgba(20, 184, 166, 0.18);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(240, 253, 250, 0.82));
+}
+
 .connection-card__eyebrow {
   margin: 0 0 6px;
   font-size: 0.7rem;
@@ -427,6 +441,10 @@ canvas {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: #1d4ed8;
+}
+
+.connection-card--placement .connection-card__eyebrow {
+  color: #0f766e;
 }
 
 .connection-card__title {
@@ -519,6 +537,13 @@ body.is-dragging {
     max-height: min(36vh, 320px);
   }
 
+  .debug-panel--part-model {
+    left: auto;
+    right: 12px;
+    bottom: 12px;
+    max-height: min(36vh, 320px);
+  }
+
   .debug-panel--code {
     top: 12px;
     right: 12px;
@@ -550,5 +575,25 @@ body.is-dragging {
   .code-panel__editor {
     min-height: 180px;
     font-size: 0.8rem;
+  }
+  .parts-card__icon {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .parts-card__icon-img {
+    width: 30px;
+    height: 30px;
+    object-fit: contain;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .parts-card__icon-text {
+    font-weight: 700;
   }
 }
