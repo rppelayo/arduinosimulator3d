@@ -10,8 +10,8 @@ import { ArduinoUnoSimulator, } from './avr/avr8Simulator.js';
 
 const BREADBOARD_PITCH = 2.54;
 const SNAP_DISTANCE = 4.4;
-const CABLE_EXIT_OFFSET = 14.85;
-const CABLE_RADIUS = 0.9;
+const CABLE_EXIT_OFFSET = 8.0;
+const CABLE_RADIUS = 0.55;
 const DEG_TO_RAD = Math.PI / 180;
 const PLUG_INSERTION_DEPTH = 3.2;
 const DEFAULT_PART_SURFACE_LIFT = 0.14;
@@ -482,7 +482,7 @@ partsPanel.innerHTML = `
   <div class="debug-panel__header">
     <p class="eyebrow">Parts Bin</p>
     <h2>Drag Components</h2>
-    <p class="debug-panel__copy">Press and drag a component card onto the breadboard, then release to place it.</p>
+    <p class="debug-panel__copy">Press and drag a component card onto the breadboard, use the mouse-wheel to rotate it, then release to place it.</p>
   </div>
   <div class="debug-panel__sections" data-parts-sections></div>
   <div class="debug-panel__actions">
@@ -1652,6 +1652,89 @@ function getAvrComponentTerminalNames(componentType) {
   };
 }
 
+function findReversedLedPaths(snapshot) {
+  const paths = [];
+
+  const pinEntries = Object.entries(snapshot.arduinoPins);
+
+  const getSingleNet = (pinNet) => {
+    if (Array.isArray(pinNet)) {
+      return pinNet[0] ?? null;
+    }
+
+    return pinNet ?? null;
+  };
+
+  const getGroundNets = () => {
+    const gnd = snapshot.arduinoPins.GND;
+
+    if (!gnd) {
+      return new Set();
+    }
+
+    return new Set(Array.isArray(gnd) ? gnd : [gnd]);
+  };
+
+  const groundNets = getGroundNets();
+
+  const resistors = snapshot.components.filter(
+    (component) => component.connected && component.type === 'resistor10k'
+  );
+
+  const leds = snapshot.components.filter(
+    (component) => component.connected && component.type === 'ledRed'
+  );
+
+  for (const led of leds) {
+    const anodeNet = led.terminals.anode?.net;
+    const cathodeNet = led.terminals.cathode?.net;
+
+    if (!anodeNet || !cathodeNet) {
+      continue;
+    }
+
+    for (const [pinLabel, pinNetValue] of pinEntries) {
+      if (!/^D\d+$/.test(pinLabel)) {
+        continue;
+      }
+
+      const pinNet = getSingleNet(pinNetValue);
+
+      if (!pinNet) {
+        continue;
+      }
+
+      // Reversed case:
+      // Digital pin -> LED cathode, LED anode -> resistor -> GND
+      if (pinNet === cathodeNet) {
+        const resistorToGround = resistors.find((resistor) => {
+          const leadANet = resistor.terminals.leadA?.net;
+          const leadBNet = resistor.terminals.leadB?.net;
+
+          return (
+            (leadANet === anodeNet && groundNets.has(leadBNet)) ||
+            (leadBNet === anodeNet && groundNets.has(leadANet))
+          );
+        });
+
+        if (resistorToGround) {
+          paths.push({
+            ledId: led.id,
+            ledLabel: led.label,
+            pin: pinLabel,
+            pinNet,
+            mode: 'reversed-polarity',
+            activeWhen: 'HIGH',
+            seriesResistorId: resistorToGround.id,
+          });
+        }
+      }
+    }
+  }
+
+  return paths;
+}
+
 function findLedOutputPaths(snapshot) {
   const paths = [];
 
@@ -1751,6 +1834,8 @@ function disposeAvrRunner() {
     avrRunner.stop?.();
     avrRunner = null;
   }
+
+  resetSimulationVisuals();
 }
 
 function normalizeSimulationPinStates(snapshot) {
@@ -1847,9 +1932,132 @@ window.debugAvrSnapshot = () => {
 };
 
 const LED_OFF_COLOR = 0xef4444;
-const LED_ON_COLOR = 0xff2222;
-const LED_ON_EMISSIVE = 0xff3333;
+const LED_ON_COLOR = 0xff2a1a;
+const LED_ON_EMISSIVE = 0xff1a10;
 const LED_OFF_EMISSIVE = 0x000000;
+
+const LED_FADE_SPEED = 9.0;       // higher = faster fade
+const LED_GLOW_COLOR = 0xff1e12;
+const LED_LIGHT_DISTANCE = 28;
+const LED_LIGHT_DECAY = 2.0;
+const LED_MAX_LIGHT_INTENSITY = 1.8;
+const LED_MAX_GLOW_OPACITY = 0.28;
+const LED_MAX_EMISSIVE_INTENSITY = 4.5;
+
+const LED_REVERSE_SMOKE_COLOR = 0x777777;
+const LED_SMOKE_PARTICLE_COUNT = 28;
+const LED_SMOKE_RADIUS = 1.2;
+const LED_SMOKE_MAX_OPACITY = 0.42;
+const LED_SMOKE_RISE_SPEED = 6.0;
+const LED_SMOKE_SPREAD_SPEED = 3.2;
+const LED_SMOKE_LIFETIME = 1.6;
+const LED_REVERSE_SMOKE_DELAY = 1.5;
+
+function createSmokeTexture() {
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(
+    size / 2,
+    size / 2,
+    0,
+    size / 2,
+    size / 2,
+    size / 2
+  );
+
+  gradient.addColorStop(0.0, 'rgba(160,160,160,0.55)');
+  gradient.addColorStop(0.35, 'rgba(130,130,130,0.35)');
+  gradient.addColorStop(0.7, 'rgba(100,100,100,0.12)');
+  gradient.addColorStop(1.0, 'rgba(80,80,80,0.0)');
+
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+const LED_SMOKE_TEXTURE = createSmokeTexture();
+
+window.ledSmokeTuning = window.ledSmokeTuning ?? {
+  sourceHeight: 0,
+  sourceX: 0,
+  sourceY: 0,
+  sourceZ: -4.2,
+};
+
+function ensureLedGlowObjects(part) {
+  if (!part || part.userData.ledGlowReady) {
+    return;
+  }
+
+  let ledBodyMesh = null;
+
+  part.userData.content?.traverse((object) => {
+    if (ledBodyMesh || !object.isMesh || !object.material) {
+      return;
+    }
+
+    if (object.name === 'Node1' || isLedBodyMesh(object)) {
+      ledBodyMesh = object;
+    }
+  });
+
+  if (!ledBodyMesh) {
+    console.warn('LED body mesh not found for glow placement.', part);
+    return;
+  }
+
+  ledBodyMesh.geometry.computeBoundingBox();
+
+  const localCenter = new THREE.Vector3();
+  ledBodyMesh.geometry.boundingBox.getCenter(localCenter);
+
+  // Move the glow slightly toward the visible front/top of the dome.
+  // Tune these three values if needed.
+  localCenter.x += 0;
+  localCenter.y += 0;
+  localCenter.z += 0;
+
+  const glow = new THREE.Mesh(
+    new THREE.SphereGeometry(2.2, 32, 32),
+    new THREE.MeshBasicMaterial({
+      color: LED_GLOW_COLOR,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+    })
+  );
+
+  glow.position.copy(localCenter);
+  glow.renderOrder = 999;
+
+  const pointLight = new THREE.PointLight(
+    LED_GLOW_COLOR,
+    0,
+    LED_LIGHT_DISTANCE,
+    LED_LIGHT_DECAY
+  );
+
+  pointLight.position.copy(localCenter);
+
+  // Important: attach to the actual dome mesh, not the part root.
+  ledBodyMesh.add(glow);
+  ledBodyMesh.add(pointLight);
+
+  part.userData.ledGlow = glow;
+  part.userData.ledPointLight = pointLight;
+  part.userData.ledBrightness = part.userData.ledBrightness ?? 0;
+  part.userData.ledTargetBrightness = part.userData.ledTargetBrightness ?? 0;
+  part.userData.ledGlowReady = true;
+}
 
 function isLedBodyMesh(object) {
   const meshName = String(object.name ?? '').toLowerCase();
@@ -1959,53 +2167,19 @@ function setLedVisualState(partOrId, isOn) {
   }
 
   cacheOriginalLedMaterials(part);
+  ensureLedGlowObjects(part);
 
-  for (const entry of part.userData.ledMaterialCache ?? []) {
-    const material = entry.material;
-
-    if (!material) {
-      continue;
-    }
-
-    if (isOn) {
-      material.color?.setHex?.(LED_ON_COLOR);
-
-      if (material.emissive) {
-        material.emissive.setHex(LED_ON_EMISSIVE);
-        material.emissiveIntensity = 2.5;
-      }
-
-      material.transparent = true;
-      material.opacity = 0.95;
-    } else {
-      if (entry.color && material.color) {
-        material.color.copy(entry.color);
-      } else {
-        material.color?.setHex?.(LED_OFF_COLOR);
-      }
-
-      if (entry.emissive && material.emissive) {
-        material.emissive.copy(entry.emissive);
-      } else if (material.emissive) {
-        material.emissive.setHex(LED_OFF_EMISSIVE);
-      }
-
-      material.emissiveIntensity = entry.emissiveIntensity;
-      material.opacity = entry.opacity;
-      material.transparent = entry.transparent;
-    }
-
-    material.needsUpdate = true;
-  }
-
+  part.userData.ledTargetBrightness = isOn ? 1 : 0;
   part.userData.isLedOn = isOn;
 }
 
 function updateLedVisualsFromArduinoPinStates(pinStates) {
   const snapshot = buildAvrSimulationSnapshot();
   const ledPaths = findLedOutputPaths(snapshot);
+  const reversedLedPaths = findReversedLedPaths(snapshot);
 
   const poweredLedIds = new Set();
+  const reversedPoweredLedIds = new Set();
 
   for (const path of ledPaths) {
     const pinState = pinStates[path.pin];
@@ -2024,13 +2198,187 @@ function updateLedVisualsFromArduinoPinStates(pinStates) {
     }
   }
 
+  for (const path of reversedLedPaths) {
+    const pinState = pinStates[path.pin];
+
+    if (!pinState) {
+      continue;
+    }
+
+    const isReversedPowered =
+      path.activeWhen === 'HIGH'
+        ? pinState.mode === 'output' && pinState.value === true
+        : pinState.mode === 'output' && pinState.value === false;
+
+    if (isReversedPowered) {
+      reversedPoweredLedIds.add(path.ledId);
+    }
+  }
+
   for (const part of placedParts) {
     if (part.userData.definitionKey !== 'ledRed') {
       continue;
     }
 
-    setLedVisualState(part, poweredLedIds.has(part.uuid));
+    const isCorrectlyPowered = poweredLedIds.has(part.uuid);
+    const isReversedPowered = reversedPoweredLedIds.has(part.uuid);
+
+    setLedVisualState(part, isCorrectlyPowered && !isReversedPowered);
+
+    // Do not start smoke instantly.
+    // Store the reverse-polarity state, and let animateLedSmoke() handle the delay.
+    part.userData.ledReversePowered = isReversedPowered;
+
+    if (!isReversedPowered) {
+      part.userData.ledReverseStartedAt = null;
+      setLedSmokeState(part, false);
+    }
   }
+}
+
+function ensureLedSmokeObjects(part) {
+  if (!part || part.userData.ledSmokeReady) {
+    return;
+  }
+
+  let ledBodyMesh = null;
+
+  part.userData.content?.traverse((object) => {
+    if (ledBodyMesh || !object.isMesh || !object.material) {
+      return;
+    }
+
+    if (object.name === 'Node1' || isLedBodyMesh(object)) {
+      ledBodyMesh = object;
+    }
+  });
+
+  if (!ledBodyMesh) {
+    console.warn('LED body mesh not found for smoke placement.', part);
+    return;
+  }
+
+  ledBodyMesh.geometry.computeBoundingBox();
+
+  const localCenter = new THREE.Vector3();
+  ledBodyMesh.geometry.boundingBox.getCenter(localCenter);
+
+  const smokeGroup = new THREE.Group();
+  smokeGroup.position.copy(localCenter);
+
+  const smokeMaterial = new THREE.MeshBasicMaterial({
+    color: LED_REVERSE_SMOKE_COLOR,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.NormalBlending,
+  });
+
+  const particles = [];
+
+  for (let i = 0; i < LED_SMOKE_PARTICLE_COUNT; i += 1) {
+    const particle = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: LED_SMOKE_TEXTURE,
+        color: LED_REVERSE_SMOKE_COLOR,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        depthTest: false,
+        blending: THREE.NormalBlending,
+      })
+    );
+
+    particle.visible = false;
+    particle.userData.seed = Math.random() * Math.PI * 2;
+    particle.userData.age = Math.random() * LED_SMOKE_LIFETIME;
+    particle.userData.offsetX = (Math.random() - 0.5) * 1.8;
+    particle.userData.offsetZ = (Math.random() - 0.5) * 1.8;
+    particle.userData.scaleSeed = 0.7 + Math.random() * 0.8;
+
+    smokeGroup.add(particle);
+    particles.push(particle);
+  }
+
+  ledBodyMesh.add(smokeGroup);
+
+  // Convert world up into ledBodyMesh local direction
+  ledBodyMesh.updateMatrixWorld(true);
+
+  const smokeUpLocal = new THREE.Vector3(0, 1, 0);
+  const parentQuaternion = new THREE.Quaternion();
+  ledBodyMesh.getWorldQuaternion(parentQuaternion);
+  smokeUpLocal.applyQuaternion(parentQuaternion.invert()).normalize();
+
+  part.userData.ledSmokeGroup = smokeGroup;
+  part.userData.ledSmokeParticles = particles;
+  part.userData.ledSmokeUpLocal = smokeUpLocal;
+  part.userData.ledSmokeActive = false;
+  part.userData.ledSmokeReady = true;
+}
+
+function updateLedSmokeSourcePosition(part) {
+  if (!part?.userData?.ledSmokeGroup) {
+    return;
+  }
+
+  let ledBodyMesh = null;
+
+  part.userData.content?.traverse((object) => {
+    if (ledBodyMesh || !object.isMesh || !object.material) {
+      return;
+    }
+
+    if (object.name === 'Node1' || isLedBodyMesh(object)) {
+      ledBodyMesh = object;
+    }
+  });
+
+  if (!ledBodyMesh) {
+    return;
+  }
+
+  ledBodyMesh.updateMatrixWorld(true);
+  ledBodyMesh.geometry.computeBoundingBox();
+
+  const localCenter = new THREE.Vector3();
+  ledBodyMesh.geometry.boundingBox.getCenter(localCenter);
+
+  // Convert real scene-up direction into this LED mesh's local space.
+  const worldQuaternion = new THREE.Quaternion();
+  ledBodyMesh.getWorldQuaternion(worldQuaternion);
+
+  const smokeUpLocal = new THREE.Vector3(0, 1, 0)
+    .applyQuaternion(worldQuaternion.invert())
+    .normalize();
+
+  const tuning = window.ledSmokeTuning ?? {};
+
+  // Move the source along real world-up, not arbitrary local y/z.
+  localCenter.addScaledVector(smokeUpLocal, tuning.sourceHeight ?? 0);
+
+  // Optional manual local-axis trims.
+  localCenter.x += tuning.sourceX ?? 0;
+  localCenter.y += tuning.sourceY ?? 0;
+  localCenter.z += tuning.sourceZ ?? 0;
+
+  part.userData.ledSmokeGroup.position.copy(localCenter);
+  part.userData.ledSmokeUpLocal = smokeUpLocal;
+}
+
+function setLedSmokeState(partOrId, isSmoking) {
+  const part =
+    typeof partOrId === 'string'
+      ? findPlacedPartById(partOrId)
+      : partOrId;
+
+  if (!part || part.userData.definitionKey !== 'ledRed') {
+    return;
+  }
+
+  ensureLedSmokeObjects(part);
+  part.userData.ledSmokeActive = isSmoking;
 }
 
 function ensureAvrRunner() {
@@ -2117,6 +2465,25 @@ window.testLedOff = () => {
   for (const part of placedParts) {
     if (part.userData.definitionKey === 'ledRed') {
       setLedVisualState(part, false);
+    }
+  }
+};
+
+window.testLedSmokeOn = () => {
+  for (const part of placedParts) {
+    if (part.userData.definitionKey === 'ledRed') {
+      part.userData.ledReversePowered = true;
+      part.userData.ledReverseStartedAt = null;
+    }
+  }
+};
+
+window.testLedSmokeOff = () => {
+  for (const part of placedParts) {
+    if (part.userData.definitionKey === 'ledRed') {
+      part.userData.ledReversePowered = false;
+      part.userData.ledReverseStartedAt = null;
+      setLedSmokeState(part, false);
     }
   }
 };
@@ -3929,6 +4296,20 @@ function buildPartsPanel() {
   });
 }
 
+function resetSimulationVisuals() {
+  for (const part of placedParts) {
+    if (part.userData.definitionKey !== 'ledRed') {
+      continue;
+    }
+
+    setLedVisualState(part, false);
+
+    part.userData.ledReversePowered = false;
+    part.userData.ledReverseStartedAt = null;
+    setLedSmokeState(part, false);
+  }
+}
+
 function setArduinoCodePanelBusy(isBusy) {
   arduinoCompileInFlight = isBusy;
 
@@ -3945,6 +4326,9 @@ function stopArduinoSimulation() {
   }
 
   avrRunner.stop?.();
+
+  resetSimulationVisuals();
+
   console.log('AVR simulation stopped.');
   setStatus('Arduino simulation stopped.');
 }
@@ -4267,45 +4651,60 @@ function refreshTargetVisuals() {
 function createDupontPlug(includeHandle = false) {
   const group = new THREE.Group();
 
+  const PIN_RADIUS = 0.18;
+  const PIN_LENGTH = 4.2;
+
+  const COLLAR_TOP_RADIUS = 0.48;
+  const COLLAR_BOTTOM_RADIUS = 0.54;
+  const COLLAR_HEIGHT = 1.0;
+
+  const HOUSING_SIZE = 1.8;
+  const HOUSING_HEIGHT = 3.5;
+
+  const RELIEF_TOP_RADIUS = 0.45;
+  const RELIEF_BOTTOM_RADIUS = 0.56;
+  const RELIEF_HEIGHT = 1.4;
+
   const pin = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.34, 0.34, 4.8, 18),
+    new THREE.CylinderGeometry(PIN_RADIUS, PIN_RADIUS, PIN_LENGTH, 18),
     new THREE.MeshStandardMaterial({
       color: 0xd9e2eb,
       metalness: 0.7,
       roughness: 0.28,
     })
   );
-  pin.position.y = 2.4;
+  pin.position.y = PIN_LENGTH / 2;
 
   const collar = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.85, 0.92, 1.8, 20),
+    new THREE.CylinderGeometry(COLLAR_TOP_RADIUS, COLLAR_BOTTOM_RADIUS, COLLAR_HEIGHT, 20),
     new THREE.MeshStandardMaterial({
       color: 0xb9c0c7,
       metalness: 0.35,
       roughness: 0.45,
     })
   );
-  collar.position.y = 5.3;
+  collar.position.y = PIN_LENGTH + COLLAR_HEIGHT / 2 - 0.15;
 
   const housing = new THREE.Mesh(
-    new THREE.BoxGeometry(3.65, 6.2, 3.65),
+    new THREE.BoxGeometry(HOUSING_SIZE, HOUSING_HEIGHT, HOUSING_SIZE),
     new THREE.MeshStandardMaterial({
       color: 0x1f2730,
       roughness: 0.88,
       metalness: 0.05,
     })
   );
-  housing.position.y = 9.5;
+  housing.position.y = PIN_LENGTH + COLLAR_HEIGHT + HOUSING_HEIGHT / 2 - 0.35;
 
   const strainRelief = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.02, 1.18, 2.6, 18),
+    new THREE.CylinderGeometry(RELIEF_TOP_RADIUS, RELIEF_BOTTOM_RADIUS, RELIEF_HEIGHT, 18),
     new THREE.MeshStandardMaterial({
       color: 0x2c3641,
       roughness: 0.9,
       metalness: 0.04,
     })
   );
-  strainRelief.position.y = 13.55;
+  strainRelief.position.y =
+    PIN_LENGTH + COLLAR_HEIGHT + HOUSING_HEIGHT + RELIEF_HEIGHT / 2 - 0.55;
 
   group.add(pin, collar, housing, strainRelief);
 
@@ -4326,7 +4725,8 @@ function createDupontPlug(includeHandle = false) {
         depthWrite: false,
       })
     );
-    halo.position.y = 9.5;
+
+    halo.position.y = housing.position.y;
     group.add(halo);
 
     const hitArea = new THREE.Mesh(
@@ -4337,7 +4737,8 @@ function createDupontPlug(includeHandle = false) {
         depthWrite: false,
       })
     );
-    hitArea.position.y = 9.5;
+
+    hitArea.position.y = housing.position.y;
     group.add(hitArea);
 
     group.userData.halo = halo;
@@ -5719,6 +6120,174 @@ function cacheSnapTargetWorldPositions() {
   }
 }
 
+function animateLedSmoke(deltaTime) {
+  const elapsed = clock.getElapsedTime();
+
+  for (const part of placedParts) {
+    if (part.userData.definitionKey !== 'ledRed') {
+      continue;
+    }
+
+    ensureLedSmokeObjects(part);
+    updateLedSmokeSourcePosition(part);
+
+    const particles = part.userData.ledSmokeParticles ?? [];
+    const reversePowered = Boolean(part.userData.ledReversePowered);
+
+    if (reversePowered && part.userData.ledReverseStartedAt == null) {
+      part.userData.ledReverseStartedAt = elapsed;
+    }
+
+    const reverseDuration =
+      reversePowered && part.userData.ledReverseStartedAt != null
+        ? elapsed - part.userData.ledReverseStartedAt
+        : 0;
+
+    const active = reversePowered && reverseDuration >= LED_REVERSE_SMOKE_DELAY;
+
+    part.userData.ledSmokeActive = active;
+
+    for (const particle of particles) {
+      if (!particle) {
+        continue;
+      }
+
+      if (!active) {
+        particle.material.opacity = THREE.MathUtils.damp(
+          particle.material.opacity,
+          0,
+          8,
+          deltaTime
+        );
+
+        if (particle.material.opacity < 0.01) {
+          particle.visible = false;
+        }
+
+        continue;
+      }
+
+      particle.visible = true;
+
+      particle.userData.age += deltaTime;
+
+      if (particle.userData.age > LED_SMOKE_LIFETIME) {
+        particle.userData.age = 0;
+        particle.userData.offsetX = (Math.random() - 0.5) * 0.8;
+        particle.userData.offsetZ = (Math.random() - 0.5) * 0.8;
+        particle.userData.scaleSeed = 0.7 + Math.random() * 0.8;
+      }
+
+      const t = particle.userData.age / LED_SMOKE_LIFETIME;
+      const swirl = Math.sin(elapsed * 3.0 + particle.userData.seed) * 0.35;
+
+      const smokeUpLocal = part.userData.ledSmokeUpLocal ?? new THREE.Vector3(0, 1, 0);
+
+      // build a sideways drift vector
+      const driftX =
+        particle.userData.offsetX + swirl * t * LED_SMOKE_SPREAD_SPEED;
+      const driftZ =
+        particle.userData.offsetZ +
+        Math.cos(elapsed * 2.2 + particle.userData.seed) * t;
+
+      // rise along world-up converted into local space
+      tempPoint.copy(smokeUpLocal).multiplyScalar(t * LED_SMOKE_RISE_SPEED);
+
+      // add some sideways spread in local X/Z
+      tempPoint.x += driftX;
+      tempPoint.z += driftZ;
+
+      particle.position.copy(tempPoint);
+
+      const scale = particle.userData.scaleSeed * THREE.MathUtils.lerp(0.4, 1.8, t);
+      particle.scale.setScalar(scale);
+
+      // Fade in, then fade out.
+      const opacity =
+        t < 0.35
+          ? THREE.MathUtils.lerp(0, LED_SMOKE_MAX_OPACITY, t / 0.35)
+          : THREE.MathUtils.lerp(LED_SMOKE_MAX_OPACITY, 0, (t - 0.35) / 0.65);
+
+      particle.material.opacity = opacity;
+    }
+  }
+}
+
+function animateLedVisuals(deltaTime) {
+  const elapsed = clock.getElapsedTime();
+
+  for (const part of placedParts) {
+    if (part.userData.definitionKey !== 'ledRed') {
+      continue;
+    }
+
+    cacheOriginalLedMaterials(part);
+    ensureLedGlowObjects(part);
+
+    const current = part.userData.ledBrightness ?? 0;
+    const target = part.userData.ledTargetBrightness ?? 0;
+
+    const next = THREE.MathUtils.damp(
+      current,
+      target,
+      LED_FADE_SPEED,
+      deltaTime
+    );
+
+    part.userData.ledBrightness = next;
+
+    // Small living pulse when ON, but none when OFF.
+    const pulse =
+      target > 0
+        ? 0.92 + Math.sin(elapsed * 34.0) * 0.08
+        : 1.0;
+
+    const brightness = THREE.MathUtils.clamp(next * pulse, 0, 1);
+
+    for (const entry of part.userData.ledMaterialCache ?? []) {
+      const material = entry.material;
+
+      if (!material) {
+        continue;
+      }
+
+      if (entry.color && material.color) {
+        material.color.copy(entry.color).lerp(
+          new THREE.Color(LED_ON_COLOR),
+          brightness
+        );
+      }
+
+      if (material.emissive) {
+        const baseEmissive = entry.emissive ?? new THREE.Color(LED_OFF_EMISSIVE);
+        material.emissive.copy(baseEmissive).lerp(
+          new THREE.Color(LED_ON_EMISSIVE),
+          brightness
+        );
+        material.emissiveIntensity =
+          entry.emissiveIntensity +
+          brightness * LED_MAX_EMISSIVE_INTENSITY;
+      }
+
+      material.transparent = true;
+      material.opacity = THREE.MathUtils.lerp(entry.opacity ?? 1, 0.94, brightness);
+      material.needsUpdate = true;
+    }
+
+    if (part.userData.ledGlow) {
+      part.userData.ledGlow.material.opacity = brightness * LED_MAX_GLOW_OPACITY;
+      part.userData.ledGlow.scale.setScalar(
+        THREE.MathUtils.lerp(0.75, 1.25, brightness)
+      );
+    }
+
+    if (part.userData.ledPointLight) {
+      part.userData.ledPointLight.intensity =
+        brightness * LED_MAX_LIGHT_INTENSITY;
+    }
+  }
+}
+
 function updateHandleVisuals() {
   const pulse = 1 + Math.sin(clock.getElapsedTime() * 4.25) * 0.06;
 
@@ -6614,7 +7183,12 @@ async function init() {
 function animate() {
   requestAnimationFrame(animate);
 
-  updateHandleVisuals();
+  const delta = clock.getDelta();
+  
   controls.update();
+  updateHandleVisuals();
+  animateLedVisuals(delta);
+  animateLedSmoke(delta);
+
   renderer.render(scene, camera);
 }
