@@ -621,6 +621,57 @@ function getRoundedCameraVector(vector, digits = 2) {
   };
 }
 
+function addWorkbenchModel(environment, options) {
+  const {
+    url,
+    position = { x: 0, y: 0, z: 0 },
+    rotation = { x: 0, y: 0, z: 0 },
+    scale = 1,
+    name = 'workbench-prop',
+  } = options;
+
+  loader.load(
+    resolvePublicAssetUrl(url),
+    (gltf) => {
+      const model = gltf.scene;
+      model.name = name;
+
+      model.position.set(position.x, position.y, position.z);
+      model.rotation.set(
+        rotation.x * DEG_TO_RAD,
+        rotation.y * DEG_TO_RAD,
+        rotation.z * DEG_TO_RAD
+      );
+
+      if (typeof scale === 'number') {
+        model.scale.setScalar(scale);
+      } else {
+        model.scale.set(scale.x, scale.y, scale.z);
+      }
+
+      model.traverse((object) => {
+        if (!object.isMesh) {
+          return;
+        }
+
+        object.castShadow = true;
+        object.receiveShadow = true;
+
+        if (object.material) {
+          object.material = object.material.clone();
+          object.material.needsUpdate = true;
+        }
+      });
+
+      environment.add(model);
+    },
+    undefined,
+    (error) => {
+      console.error(`Failed to load workbench model: ${url}`, error);
+    }
+  );
+}
+
 function createRealisticWorkbenchEnvironment() {
   const environment = new THREE.Group();
 
@@ -763,9 +814,27 @@ function createRealisticWorkbenchEnvironment() {
   cable.receiveShadow = true;
   environment.add(cable);
 
+  addWorkbenchModel(environment, {
+    url: '/models/uno_simulator/multimeter.glb',
+    name: 'multitester',
+    position: {
+      x: -135,
+      y: WORKBENCH_SURFACE_Y + 1.5,
+      z: 0,
+    },
+    rotation: {
+      x: 90,
+      y: 0,
+      z: 90,
+    },
+    scale: 1,
+  });
+
   scene.add(environment);
   return environment;
 }
+
+const loader = new GLTFLoader();
 
 createRealisticWorkbenchEnvironment();
 
@@ -812,8 +881,6 @@ scene.add(fillLight);
 
 const assembly = new THREE.Group();
 scene.add(assembly);
-
-const loader = new GLTFLoader();
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const arduinoDragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
