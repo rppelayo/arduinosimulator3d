@@ -1,4 +1,7 @@
 :root {
+  --desktop-panel-edge-gap: 18px;
+  --desktop-panel-stack-gap: 16px;
+  --desktop-serial-monitor-max-height: min(28vh, 320px);
   color-scheme: light;
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   background: #d7e2ea;
@@ -33,11 +36,16 @@ canvas {
 
 .hud {
   position: fixed;
-  top: 18px;
-  left: 18px;
+  top: var(--desktop-panel-edge-gap);
+  left: var(--desktop-panel-edge-gap);
   z-index: 10;
   width: min(380px, calc(100vw - 32px));
-  max-height: calc(100vh - 36px);
+  max-height: calc(
+    100vh -
+    (var(--desktop-panel-edge-gap) * 2) -
+    var(--desktop-serial-monitor-max-height) -
+    var(--desktop-panel-stack-gap)
+  );
   padding: 16px 18px;
   overflow: auto;
   border: 1px solid rgba(148, 163, 184, 0.34);
@@ -61,6 +69,136 @@ canvas {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.88);
   box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(14px);
+}
+
+.camera-view-toolbar {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  z-index: 14;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+.camera-view-toolbar__label {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #2563eb;
+}
+
+.camera-view-toolbar__buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.camera-view-toolbar__button,
+.mobile-action-toolbar__button,
+.mobile-panel-dock__button {
+  padding: 9px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease,
+    transform 120ms ease, opacity 120ms ease;
+}
+
+.camera-view-toolbar__button:hover,
+.mobile-action-toolbar__button:hover,
+.mobile-panel-dock__button:hover {
+  border-color: rgba(37, 99, 235, 0.34);
+}
+
+.camera-view-toolbar__button:active,
+.mobile-action-toolbar__button:active,
+.mobile-panel-dock__button:active {
+  transform: translateY(1px);
+}
+
+.camera-view-toolbar__button--active,
+.mobile-action-toolbar__button--active,
+.mobile-panel-dock__button--active {
+  border-color: rgba(29, 78, 216, 0.66);
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.camera-view-toolbar__button:disabled,
+.mobile-action-toolbar__button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.mobile-action-toolbar,
+.mobile-panel-dock {
+  display: none;
+}
+
+.mobile-action-toolbar {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(68px + env(safe-area-inset-bottom));
+  z-index: 18;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+.mobile-action-toolbar__button {
+  flex: 0 0 auto;
+  min-width: 88px;
+}
+
+.mobile-action-toolbar__hint {
+  flex: 1;
+  margin: 0;
+  color: #334155;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.mobile-panel-dock__button {
+  flex: 1;
+}
+
+.mobile-panel-dock {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 19;
+  gap: 8px;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.14);
   backdrop-filter: blur(14px);
 }
 
@@ -118,6 +256,15 @@ canvas {
   max-height: min(46vh, 520px);
 }
 
+.debug-panel--serial {
+  top: auto;
+  left: var(--desktop-panel-edge-gap);
+  right: auto;
+  bottom: var(--desktop-panel-edge-gap);
+  width: min(420px, calc(100vw - 32px));
+  max-height: var(--desktop-serial-monitor-max-height);
+}
+
 .debug-panel--lead-points {
   top: 164px;
   left: 18px;
@@ -133,6 +280,14 @@ canvas {
   bottom: 18px;
   width: min(440px, calc(100vw - 32px));
   max-height: min(42vh, 360px);
+}
+
+.debug-panel--usb-plug {
+  top: 164px;
+  right: 18px;
+  bottom: auto;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(42vh, 380px);
 }
 
 .debug-panel--parts {
@@ -256,6 +411,28 @@ canvas {
 .code-panel__editor:focus {
   outline: 2px solid rgba(37, 99, 235, 0.22);
   border-color: rgba(37, 99, 235, 0.55);
+}
+
+.serial-monitor__output {
+  min-height: 140px;
+  max-height: min(22vh, 240px);
+  margin-top: 14px;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.48);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.96);
+  color: #0f172a;
+  font-family: "Consolas", "SFMono-Regular", monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-sizing: border-box;
+}
+
+.serial-monitor__output--empty {
+  color: #64748b;
 }
 
 .rotation-card__header {
@@ -544,6 +721,13 @@ body.is-dragging {
     max-height: min(36vh, 320px);
   }
 
+  .debug-panel--usb-plug {
+    top: 12px;
+    right: 12px;
+    bottom: auto;
+    max-height: min(36vh, 320px);
+  }
+
   .debug-panel--code {
     top: 12px;
     right: 12px;
@@ -596,4 +780,78 @@ body.is-dragging {
   .parts-card__icon-text {
     font-weight: 700;
   }
+}
+
+body.is-mobile-ui .mobile-action-toolbar,
+body.is-mobile-ui .mobile-panel-dock {
+  display: flex;
+}
+
+body.is-mobile-ui .camera-view-toolbar {
+  top: 12px;
+  width: min(560px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  padding: 10px;
+  border-radius: 20px;
+}
+
+body.is-mobile-ui .camera-view-toolbar__buttons {
+  flex: 1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+body.is-mobile-ui .camera-view-toolbar__button,
+body.is-mobile-ui .mobile-action-toolbar__button,
+body.is-mobile-ui .mobile-panel-dock__button {
+  min-height: 42px;
+  font-size: 0.86rem;
+}
+
+body.is-mobile-ui .mobile-action-toolbar__hint {
+  font-size: 0.82rem;
+}
+
+body.is-mobile-ui .hud,
+body.is-mobile-ui .debug-panel {
+  top: auto !important;
+  left: 12px !important;
+  right: 12px !important;
+  bottom: calc(128px + env(safe-area-inset-bottom)) !important;
+  width: auto !important;
+  max-width: none !important;
+  max-height: min(54vh, 540px) !important;
+  padding: 16px !important;
+  border-radius: 22px;
+  box-sizing: border-box;
+  z-index: 17;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+body.is-mobile-ui .hud .panel-toggle,
+body.is-mobile-ui .debug-panel .panel-toggle {
+  display: none;
+}
+
+body.is-mobile-ui .hud.panel--collapsed,
+body.is-mobile-ui .debug-panel.panel--collapsed {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(18px);
+}
+
+body.is-mobile-ui .hud:not(.panel--collapsed),
+body.is-mobile-ui .debug-panel:not(.panel--collapsed) {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+body.is-mobile-ui .debug-panel__actions {
+  flex-wrap: wrap;
+}
+
+body.is-mobile-ui .parts-card__button {
+  min-height: 64px;
 }
